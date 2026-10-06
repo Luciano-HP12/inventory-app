@@ -32,7 +32,6 @@ Cada variante podrá tener:
 - Código de barras.
 - Precio de compra.
 - Precio de venta.
-- Stock actual.
 - Stock mínimo.
 - Estado.
 
@@ -50,6 +49,8 @@ Esto permitirá utilizar el sistema en diferentes tipos de negocios sin limitarl
 
 ## Control de inventario
 
-El stock será administrado a nivel de variante y no directamente sobre el producto general.
+`ProductVariant` será la unidad inventariable y el stock no pertenecerá directamente al producto general. Sin embargo, el saldo actual tampoco se almacenará directamente en `ProductVariant`.
+
+El saldo actual se representará mediante `InventoryBalance` para cada combinación de `ProductVariant` y `Location`. Cada combinación de variante y ubicación tendrá conceptualmente un único saldo.
 
 Todo producto deberá tener al menos una variante, incluso cuando no necesite atributos adicionales.
