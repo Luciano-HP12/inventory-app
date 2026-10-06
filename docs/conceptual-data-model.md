@@ -7,6 +7,8 @@ Este documento define las principales entidades del sistema Inventory App y sus 
 - Business
 - User
 - BusinessMembership
+- Plan
+- Subscription
 - Location
 - Category
 - Product
@@ -27,6 +29,12 @@ Este documento define las principales entidades del sistema Inventory App y sus 
 - Un usuario puede pertenecer a varios negocios mediante sus membresías.
 - Un negocio puede tener múltiples usuarios mediante sus membresías.
 - Cada membresía pertenece a un usuario y a un negocio, y contiene el rol `OWNER` o `EMPLOYEE` que el usuario desempeña en ese negocio.
+- La autenticación del usuario será gestionada por un proveedor externo y requerirá correo electrónico verificado.
+- El nombre comercial de un negocio no será globalmente único.
+- La suscripción de un negocio estará asociada a un plan. La cardinalidad entre `Business` y `Subscription`, así como el historial de suscripciones, se decidirán durante el diseño relacional y del dominio de billing.
+- `Plan` representará conceptualmente las capacidades o límites comerciales aplicables a una suscripción.
+- `Subscription` representará conceptualmente el ciclo de trial y suscripción de un negocio.
+- El trial inicial durará 30 días y `TRIALING` será un estado o concepto confirmado de `Subscription`.
 - Un negocio puede registrar múltiples categorías, productos, proveedores y ventas.
 - Un negocio tiene ubicaciones de inventario y contará con al menos una `Location` predeterminada.
 - Una categoría puede contener múltiples productos.
@@ -38,8 +46,26 @@ Este documento define las principales entidades del sistema Inventory App y sus 
 - Una venta está asociada a una ubicación.
 - Una venta contiene uno o más detalles de venta.
 - Cada detalle de venta referencia una variante.
-- Una venta registra uno o más pagos para permitir una futura ampliación a pagos divididos.
-- Las operaciones sensibles podrán generar registros de auditoría.
+- Una venta registra uno o más `Payment` para permitir una futura ampliación a pagos divididos.
+- `Payment` representa exclusivamente pagos que el negocio registra por sus ventas.
+- La facturación y los pagos de la suscripción a Inventory App pertenecen a un dominio separado y no reutilizan `Payment`.
+- Las operaciones que requieran trazabilidad deberán poder generar registros de auditoría.
+
+## Suscripciones y trial
+
+La suscripción pertenece a `Business`, no directamente a `User`. Una nueva dirección de correo no representa por sí sola el derecho automático a un nuevo trial; el ciclo se modelará alrededor del negocio.
+
+El modelo deberá permitir que un plan establezca capacidades o límites, como la cantidad de ubicaciones habilitadas, sin fijar todavía valores definitivos. La relación `Business 1:N Location` estará soportada desde la V1 aunque el plan contratado pueda limitar cuántas ubicaciones utiliza un negocio.
+
+Los demás estados y transiciones definitivos de `Subscription` quedan pendientes hasta diseñar el dominio de billing y evaluar el proveedor externo.
+
+El fin del trial o de una suscripción no eliminará inmediatamente los datos del negocio. La política definitiva de acceso restringido, conservación, exportación y eventual eliminación permanece pendiente.
+
+## Pagos de ventas y facturación SaaS
+
+`Payment` forma parte del dominio de ventas. Los cobros de suscripción que Inventory App realiza al negocio pertenecen al dominio de facturación SaaS y deberán modelarse de manera independiente cuando ese dominio sea diseñado.
+
+La facturación SaaS utilizará un proveedor externo todavía no seleccionado. El modelo propio no almacenará directamente datos sensibles de tarjetas y no considerará confirmado un pago basándose únicamente en información enviada por el frontend.
 
 ## Precios y descuentos
 
@@ -94,3 +120,6 @@ Antes de construir el modelo relacional se profundizará en:
 - Proveedores y abastecimiento.
 - Entradas de mercadería.
 - Auditoría.
+- Estados y transiciones restantes de `Subscription`.
+- Precios, límites y capacidades definitivas de los planes.
+- Política de acceso restringido, conservación, exportación y eventual eliminación de datos.

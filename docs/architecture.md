@@ -1,8 +1,6 @@
 # Arquitectura tecnológica
 
-Este documento define las decisiones arquitectónicas aprobadas para la V1 de Inventory App. Su propósito es orientar la implementación futura sin ampliar el alcance funcional del producto.
-
-Las decisiones indicadas como refinamientos reemplazan los puntos correspondientes de la documentación anterior. Los documentos originales se actualizarán posteriormente en una tarea separada para conservar la trazabilidad de los cambios.
+Este documento define las decisiones arquitectónicas aprobadas para la V1 de Inventory App, un SaaS comercial multiempresa por suscripción. Su propósito es orientar la implementación futura sin ampliar el alcance funcional del producto.
 
 ## Decisiones aprobadas para la V1
 
@@ -11,6 +9,12 @@ Las decisiones indicadas como refinamientos reemplazan los puntos correspondient
 Inventory App será una aplicación web responsive preparada como Progressive Web App (PWA).
 
 La V1 requerirá conexión a Internet para todas las operaciones de escritura, de acuerdo con `docs/non-functional-requirements.md`. El modo offline con almacenamiento local y sincronización automática no forma parte de esta versión.
+
+### Autenticación
+
+La autenticación será gestionada mediante un proveedor especializado externo que todavía no ha sido seleccionado. El proveedor deberá verificar que el usuario controla su dirección de correo; una validación meramente sintáctica del correo no será suficiente.
+
+Inventory App conservará la información de dominio necesaria para relacionar al usuario autenticado con sus membresías, pero no implementará por cuenta propia el mecanismo de autenticación administrado por el proveedor.
 
 ### Tecnologías
 
@@ -91,15 +95,23 @@ Los roles iniciales serán:
 
 La V1 no incluirá permisos adicionales configurables ni un sistema RBAC configurable.
 
-#### Refinamiento de decisiones anteriores
+### Suscripciones y planes
 
-Esta relación reemplaza la relación directa de un usuario con un único negocio descrita en `docs/conceptual-data-model.md`.
+La suscripción del SaaS estará asociada a `Business`, no directamente a `User`. El dominio contemplará conceptualmente `Plan` y `Subscription`.
 
-Los roles `OWNER` y `EMPLOYEE` se mantienen, pero los permisos adicionales configurables mencionados en `docs/roles.md` quedan fuera del alcance de la V1.
+El trial inicial durará 30 días y `TRIALING` será un estado o concepto confirmado del ciclo de suscripción. Los demás estados y transiciones se definirán cuando se diseñe el dominio de billing y se evalúe el proveedor correspondiente.
+
+Una nueva dirección de correo no otorgará conceptualmente un nuevo trial de forma automática. El ciclo de trial y suscripción se gestionará alrededor del negocio y deberá conservarse la información necesaria para administrarlo correctamente.
+
+Los planes podrán definir capacidades o límites, incluida la cantidad de ubicaciones habilitadas. Todavía no se han definido precios, cantidad máxima de empleados, cantidad de ubicaciones del plan básico ni otros límites comerciales.
+
+Las decisiones del dominio se detallan en `docs/subscriptions-and-billing.md`.
 
 ### Ubicaciones
 
 Cada negocio tendrá al menos una `Location` predeterminada.
+
+La arquitectura y el modelo soportarán la relación `Business 1:N Location` desde la V1. La cantidad de ubicaciones que un negocio pueda utilizar podrá depender posteriormente de su `Plan`; este control comercial no cambia la capacidad del modelo para representar múltiples ubicaciones.
 
 Inicialmente, una ubicación podrá representar:
 
@@ -130,29 +142,31 @@ El saldo materializado permitirá consultar las existencias actuales mediante `I
 
 Los cambios de inventario que formen parte de operaciones críticas deberán mantener consistencia transaccional. Esto incluye mantener coherentes el saldo actual y los movimientos generados por una misma operación.
 
-#### Refinamiento de decisiones anteriores
+### Facturación del SaaS
 
-Esta decisión refina `docs/product-variants.md`: aunque `ProductVariant` continúa siendo la unidad sobre la que se controla el inventario, su stock actual deja de almacenarse directamente en la variante y pasa a representarse mediante `InventoryBalance` por ubicación.
+Los pagos que un negocio registra por sus ventas pertenecen al dominio de ventas y se representan mediante `Payment`. La facturación y los pagos que el negocio realiza a Inventory App por su suscripción constituyen un dominio independiente y no reutilizarán `Payment`.
 
-También concreta las reglas de `docs/inventory-rules.md` al incorporar `Location`, el saldo materializado y la unicidad conceptual de cada saldo por variante y ubicación.
+La facturación del SaaS utilizará posteriormente un proveedor o pasarela externa todavía no seleccionada. Inventory App no almacenará directamente datos sensibles de tarjetas.
+
+El backend no confiará únicamente en datos enviados por el frontend para confirmar el estado de un pago de suscripción. La confirmación deberá basarse en mecanismos confiables ofrecidos por el proveedor de pagos.
+
+### Ciclo de vida de los datos
+
+El vencimiento del trial o de una suscripción afectará el derecho de uso según la política de suscripción, pero no eliminará inmediatamente `Business`, productos, inventario, ventas ni otros datos del negocio.
+
+La política definitiva de acceso restringido, conservación, exportación y eventual eliminación continúa pendiente y no se define en esta etapa.
+
+### Requisitos transversales
+
+La seguridad, el aislamiento multi-tenant, la integridad del inventario, la auditoría y la mantenibilidad son requisitos del producto desde el diseño. Los principios de seguridad se detallan en `docs/security.md`.
 
 ## Posibilidades de evolución futura
 
-La arquitectura deberá permitir una evolución posterior hacia:
+La V1 contempla conceptualmente planes, suscripciones y el trial. La arquitectura deberá permitir una evolución posterior hacia:
 
-- múltiples sucursales;
 - transferencias entre ubicaciones;
+- planes superiores concretos que habiliten el uso de más ubicaciones u otras capacidades, junto con límites y configuraciones comerciales todavía no definidos, sin alterar el aislamiento del tenant;
 - permisos más granulares o un modelo de permisos/RBAC configurable, si existe una necesidad real;
 - capacidades offline, incluido almacenamiento local y sincronización.
 
-Estas posibilidades no forman parte de la implementación de la V1 y no deben interpretarse como requisitos actuales.
-
-## Prevalencia de los refinamientos
-
-Hasta que los documentos anteriores sean actualizados, las decisiones de este documento prevalecen exclusivamente en los siguientes puntos:
-
-1. La relación multiempresa `User → BusinessMembership → Business` reemplaza la pertenencia directa de un usuario a un único negocio.
-2. `InventoryBalance` por `ProductVariant + Location` reemplaza el almacenamiento de stock actual directamente en `ProductVariant`.
-3. Los permisos adicionales configurables quedan fuera de la V1; únicamente se contemplan inicialmente los roles `OWNER` y `EMPLOYEE`.
-
-El resto de la documentación existente conserva su alcance y vigencia.
+Estas extensiones concretas no forman parte de la implementación de la V1 y no deben interpretarse como requisitos actuales. Esta condición no excluye de la V1 los conceptos de `Plan`, `Subscription`, trial de 30 días y estado `TRIALING` definidos en este documento.

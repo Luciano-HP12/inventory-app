@@ -2,11 +2,17 @@
 
 ## Contexto
 
-Este repositorio contiene un sistema de gestión de
-inventarios multiplataforma y multiempresa.
+Este repositorio contiene un SaaS comercial por suscripción
+para la gestión de inventarios y ventas, multiplataforma y
+multiempresa.
 
 El proyecto se desarrolla de forma incremental,
 priorizando seguridad, mantenibilidad y aprendizaje.
+
+`Business` es el tenant operativo. El aislamiento entre
+negocios, la integridad del inventario y la separación entre
+pagos de ventas y facturación del SaaS deben preservarse en
+todas las decisiones técnicas.
 
 ## Reglas de trabajo
 
