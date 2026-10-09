@@ -1,6 +1,6 @@
 # Suscripciones y facturación SaaS
 
-Este documento define las decisiones conceptuales aprobadas para los planes, las suscripciones y la facturación de Inventory App como SaaS comercial multiempresa. No diseña todavía tablas, contratos de integración ni detalles de un proveedor.
+Este documento define las reglas funcionales aprobadas para planes, suscripciones y facturación de Inventory App como SaaS comercial multiempresa. El modelo conceptual y el modelo relacional contienen sus relaciones y atributos; aquí se describe el ciclo de negocio sin seleccionar todavía una pasarela ni inventar condiciones comerciales.
 
 ## Separación de dominios
 
@@ -9,52 +9,97 @@ Inventory App distingue dos dominios de pagos:
 - **Ventas del negocio:** `Sale` representa una venta y `Payment` representa exclusivamente los pagos que el negocio registra por esa venta.
 - **Facturación SaaS:** representa los cobros que Inventory App realiza al negocio por su suscripción.
 
-El dominio de facturación SaaS no reutilizará `Payment` ni se mezclará con las ventas, reportes comerciales o medios de pago registrados por el negocio.
+El dominio de facturación SaaS no reutiliza `Payment` ni se mezcla con las ventas, reportes comerciales o medios de pago registrados por el negocio.
 
 ## Plan
 
-`Plan` representa conceptualmente una oferta del SaaS y las capacidades o límites que puede habilitar para un negocio.
+`Plan` representa una oferta del SaaS. Tiene un código técnico estable, un nombre visible y un estado de actividad.
 
-La arquitectura permitirá que un plan determine capacidades como la cantidad de ubicaciones habilitadas. Esto no modifica el modelo operativo: `Business 1:N Location` estará soportado desde la V1.
+Un plan inactivo no se ofrece para nuevas suscripciones, pero continúa existiendo para preservar las suscripciones históricas que lo referencian.
+
+La arquitectura permitirá que un plan determine capacidades como la cantidad de ubicaciones habilitadas. Esto no modifica el modelo operativo: `Business 1:N Location` está soportado desde la V1.
 
 No están definidos todavía:
 
-- los precios;
-- la cantidad de ubicaciones del plan básico;
-- la cantidad máxima de empleados;
+- precios ni monedas;
+- periodicidad o duración contractual;
+- cantidad de ubicaciones de un plan concreto;
+- cantidad máxima de empleados;
 - otros límites o capacidades comerciales.
 
 ## Subscription
 
-`Subscription` representa conceptualmente el ciclo de suscripción de un `Business`. La suscripción pertenece al negocio y no directamente a un usuario.
+`Subscription` representa un período del ciclo de suscripción de un `Business`. La suscripción pertenece al negocio, no directamente a un `User`.
 
-`TRIALING` es un estado o concepto confirmado. Los demás estados y sus transiciones definitivas se decidirán al diseñar el dominio de billing y evaluar el proveedor externo.
+Un negocio puede conservar múltiples suscripciones históricas, pero como máximo una puede estar abierta a la vez. Una suscripción abierta es un período que todavía no ha terminado y cuyo estado es `TRIALING` o `ACTIVE`.
+
+Los estados aprobados para la V1 son:
+
+- `TRIALING`: el negocio se encuentra dentro de su trial vigente.
+- `ACTIVE`: el negocio tiene acceso comercial activo fuera del trial.
+- `ENDED`: el período de suscripción terminó y no concede por sí mismo acceso comercial activo.
+
+Las transiciones mínimas aprobadas son:
+
+```text
+TRIALING → ACTIVE
+TRIALING → ENDED
+ACTIVE   → ENDED
+```
+
+Una suscripción `ENDED` no se reabre. Una reactivación comercial posterior crea un nuevo período histórico `ACTIVE`.
 
 ## Trial
 
-El trial inicial durará 30 días y se modelará alrededor del negocio. Crear o utilizar una nueva dirección de correo no dará automáticamente derecho a un nuevo trial.
+Cada negocio puede consumir un único trial histórico. El trial dura exactamente 30 × 24 horas desde su inicio y su instante final no se amplía por cambios de correo, usuario propietario o membresías.
 
-El onboarding deberá seguir siendo sencillo. La V1 no aplicará por defecto bloqueos agresivos basados en nombre comercial, dirección IP, dispositivo u otros mecanismos similares.
+`trialEndsAt` es la evidencia histórica de esa concesión. Se conserva al pasar la suscripción a `ACTIVE` o `ENDED`, no se reinicia por un cambio de plan y no puede modificarse o eliminarse mediante la operación normal. No se crea una entidad `TrialGrant` ni un indicador redundante `trialConsumed`.
 
-El sistema conservará información suficiente para gestionar correctamente el ciclo de trial y suscripción. Una estrategia adicional de prevención de abuso solo se incorporará cuando exista una necesidad justificada; el mecanismo concreto de identidad empresarial, fiscal, teléfono, dispositivo u otros controles no ha sido decidido.
+Crear o utilizar una nueva dirección de correo no concede automáticamente otro trial. El derecho al trial se modela alrededor de `Business`, no de `User`.
+
+Cuando se alcanza el instante final del trial, el negocio deja de tener acceso por trial aunque un proceso programado todavía no haya materializado el cambio de estado a `ENDED`. La autorización comercial debe evaluar la vigencia temporal y no confiar únicamente en que un proceso diferido ya haya actualizado el registro.
+
+El onboarding seguirá siendo sencillo. La V1 no aplicará por defecto bloqueos agresivos basados en nombre comercial, dirección IP, dispositivo u otros mecanismos similares. Cualquier control antifraude adicional requerirá una decisión posterior justificada.
+
+## Cambios de plan e historial
+
+Un cambio efectivo de plan preserva el historial:
+
+1. termina el período abierto asociado al plan anterior;
+2. crea un nuevo período de suscripción asociado al nuevo plan;
+3. realiza ambos efectos de forma consistente en una misma operación transaccional.
+
+No se modifica retroactivamente el plan de una suscripción histórica para representar un cambio posterior.
+
+El modelo relacional refuerza bajo concurrencia tanto el trial único como la única suscripción abierta mediante índices únicos parciales. La duración exacta, la coherencia entre estado y fechas, y la inmutabilidad de la evidencia del trial se protegen además con restricciones y triggers PostgreSQL. Las transiciones comerciales continúan siendo responsabilidad del servicio.
 
 ## Facturación SaaS
 
 La facturación de suscripciones utilizará posteriormente un proveedor o pasarela externa todavía no seleccionada.
 
-Inventory App no almacenará directamente datos sensibles de tarjetas. El backend no confiará únicamente en información enviada por el frontend para confirmar el estado de un pago de suscripción; utilizará mecanismos confiables proporcionados por el proveedor de pagos.
+Inventory App no almacenará directamente datos sensibles de tarjetas. El backend no confiará únicamente en información enviada por el frontend para activar una suscripción; la confirmación deberá proceder de un mecanismo confiable del proveedor elegido.
 
-## Vencimiento y datos
+Todavía no se define qué evento concreto autoriza la transición a `ACTIVE`.
 
-El vencimiento del trial sin una suscripción activa, o la finalización posterior de una suscripción, afectará el derecho de uso conforme a la política de suscripción. No provocará por sí mismo la eliminación inmediata de `Business`, productos, inventario, ventas ni otros datos.
+## Finalización y conservación de datos
+
+El vencimiento del trial sin una suscripción activa o la finalización posterior de una suscripción afecta el derecho de uso, pero no provoca por sí mismo la eliminación inmediata de `Business`, productos, inventario, ventas ni otros datos.
 
 Continúan pendientes:
 
-- la política de acceso restringido;
+- la política de acceso restringido después de `ENDED`;
 - el período de conservación;
 - las condiciones de exportación;
 - la eventual eliminación de datos.
 
-## Decisiones comerciales pendientes
+No debe inferirse acceso posterior, período de gracia ni otra política comercial hasta que sea aprobada.
 
-Además de las políticas anteriores, permanecen pendientes el precio definitivo, la duración contractual, los límites de cada plan y la selección del proveedor de facturación. No deben inferirse valores ni comportamientos hasta que sean aprobados.
+## Decisiones pendientes
+
+- Proveedor de facturación y contratos de integración.
+- Evento confiable que permite activar una suscripción.
+- Precios, monedas, periodicidad y duración contractual.
+- Límites y capacidades concretas de cada plan.
+- Política de acceso, conservación, exportación y eliminación después de `ENDED`.
+
+Los detalles relacionales y los mecanismos físicos para proteger el historial, el único trial y la única suscripción abierta se documentan en `docs/relational-data-model.md`.

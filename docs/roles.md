@@ -1,41 +1,76 @@
-# Roles del sistema
+# Roles y membresías
 
-Inventory App contará inicialmente con dos roles: Dueño (`OWNER`) y Empleado (`EMPLOYEE`).
+Inventory App contará en la V1 únicamente con dos roles: Dueño (`OWNER`) y Empleado (`EMPLOYEE`). No se incorpora un sistema RBAC configurable ni permisos personalizados.
 
-El rol pertenecerá a `BusinessMembership`, la membresía que relaciona un usuario con un negocio. Por ello, un mismo usuario podrá pertenecer a varios negocios y tener un rol diferente en cada uno.
+## BusinessMembership
+
+El rol pertenece a `BusinessMembership`, la membresía que relaciona un `User` con un `Business`. Un usuario puede pertenecer a varios negocios y desempeñar un rol diferente en cada uno.
+
+Cada membresía tiene uno de estos estados:
+
+- `ACTIVE`: permite acceder al negocio conforme al rol.
+- `REVOKED`: ya no permite acceder al negocio.
+
+Una sesión autenticada identifica al usuario, pero no sustituye la autorización. Si su membresía fue revocada, el usuario pierde inmediatamente el acceso al negocio aunque conserve una sesión válida con el proveedor de autenticación.
+
+La revocación no elimina la membresía ni las ventas, movimientos, anulaciones, devoluciones, reembolsos, auditorías u otras operaciones históricas realizadas bajo ella.
+
+Cada negocio debe conservar al menos una membresía `ACTIVE` con rol `OWNER`. No puede revocarse ni degradarse al último propietario activo dejando al negocio sin administración.
 
 ## Dueño (`OWNER`)
 
-El dueño tendrá acceso administrativo al negocio y podrá:
+El dueño tiene acceso administrativo al negocio y puede:
 
-- Gestionar empleados.
-- Gestionar productos y variantes.
-- Gestionar categorías.
-- Gestionar proveedores.
-- Consultar costos y precios.
-- Registrar entradas de inventario.
-- Realizar ajustes de stock.
-- Registrar ventas.
-- Anular ventas.
-- Consultar movimientos de inventario.
-- Consultar reportes.
-- Visualizar información general del negocio.
+- gestionar empleados;
+- gestionar productos y variantes;
+- gestionar categorías;
+- gestionar proveedores;
+- consultar costos y precios;
+- registrar entradas de inventario;
+- realizar ajustes de stock;
+- registrar ventas;
+- anular ventas;
+- registrar devoluciones;
+- registrar reembolsos;
+- consultar movimientos de inventario;
+- consultar reportes;
+- visualizar información general del negocio.
+
+Las anulaciones, devoluciones y reembolsos son operaciones sensibles reservadas a `OWNER` en la V1.
 
 ## Empleado (`EMPLOYEE`)
 
-El empleado estará orientado principalmente a las operaciones diarias y podrá:
+El empleado está orientado principalmente a las operaciones diarias y puede:
 
-- Iniciar y cerrar sesión.
-- Consultar productos.
-- Consultar stock disponible.
-- Buscar productos mediante código de barras.
-- Registrar ventas.
-- Seleccionar métodos de pago.
-- Generar e imprimir tickets.
-- Consultar la información permitida para su rol.
+- iniciar y cerrar sesión;
+- consultar productos;
+- consultar stock disponible;
+- buscar productos mediante código de barras;
+- registrar ventas;
+- seleccionar métodos de pago;
+- generar e imprimir tickets;
+- consultar la información permitida para su rol.
 
-## Control de acceso
+En la V1, `EMPLOYEE` no puede anular ventas, registrar devoluciones ni registrar reembolsos.
 
-Los permisos deberán ser validados por el backend y no depender únicamente de la interfaz de usuario.
+## Control de acceso y aislamiento
 
-La V1 no incluirá permisos adicionales configurables ni un sistema RBAC configurable. Los permisos más granulares o un modelo RBAC podrán evaluarse como una evolución futura si existe una necesidad real, pero no constituyen un requisito actual.
+Los permisos deben validarse en el backend para cada operación y no depender únicamente de la interfaz de usuario.
+
+La autorización debe comprobar:
+
+- la identidad autenticada;
+- la existencia de la membresía correspondiente;
+- que la membresía esté `ACTIVE`;
+- el rol de esa membresía;
+- que la operación y los datos pertenezcan al mismo `Business`.
+
+Un `businessId` recibido del cliente no concede acceso por sí solo.
+
+## Decisiones pendientes
+
+- Flujo de invitación a un negocio.
+- Flujo y condiciones de reactivación de una membresía `REVOKED`.
+- Experiencia de usuario para cambios de rol y revocaciones.
+
+No se define una matriz granular adicional. Cualquier evolución futura hacia más roles, permisos configurables o RBAC requerirá una decisión explícita.

@@ -1,36 +1,92 @@
 # Arquitectura tecnológica
 
-Este documento define las decisiones arquitectónicas aprobadas para la V1 de Inventory App, un SaaS comercial multiempresa por suscripción. Su propósito es orientar la implementación futura sin ampliar el alcance funcional del producto.
+Este documento consolida las decisiones arquitectónicas aprobadas para la V1 de Inventory App. Su propósito es orientar la implementación futura sin duplicar los modelos de datos ni ampliar el alcance funcional.
 
-## Decisiones aprobadas para la V1
+## Principios
 
-### Plataforma
+Inventory App será un SaaS comercial multiempresa. La arquitectura debe preservar desde el backend:
 
-Inventory App será una aplicación web responsive preparada como Progressive Web App (PWA).
+- aislamiento entre negocios;
+- integridad del inventario y las ventas;
+- trazabilidad y conservación histórica;
+- separación entre pagos comerciales y facturación SaaS;
+- mantenibilidad y evolución incremental.
 
-La V1 requerirá conexión a Internet para todas las operaciones de escritura, de acuerdo con `docs/non-functional-requirements.md`. El modo offline con almacenamiento local y sincronización automática no forma parte de esta versión.
+`Business` es el tenant operativo. La seguridad y las reglas de dominio no pueden depender únicamente del frontend.
 
-### Autenticación
+## Frontend
 
-La autenticación será gestionada mediante un proveedor especializado externo que todavía no ha sido seleccionado. El proveedor deberá verificar que el usuario controla su dirección de correo; una validación meramente sintáctica del correo no será suficiente.
+La aplicación web utilizará:
 
-Inventory App conservará la información de dominio necesaria para relacionar al usuario autenticado con sus membresías, pero no implementará por cuenta propia el mecanismo de autenticación administrado por el proveedor.
+- React;
+- TypeScript;
+- Vite;
+- Tailwind CSS.
 
-### Tecnologías
+La interfaz será responsive para su uso desde computadoras y dispositivos móviles. El frontend se organizará por funcionalidades o *features*, agrupando los componentes relacionados con cada dominio.
 
-- Frontend: React, TypeScript, Vite y Tailwind CSS.
-- Backend: Node.js, TypeScript y Express.
-- API: REST.
-- Base de datos: PostgreSQL.
-- ORM: Prisma.
-- Identificadores principales: UUID.
-- Valores monetarios: tipos decimales; no se utilizarán tipos `float` para representar dinero.
+La aplicación estará preparada arquitectónicamente para funcionar como Progressive Web App (PWA). En la V1, toda operación de escritura requiere conexión a Internet; el almacenamiento local de operaciones, la sincronización offline automática y la resolución de conflictos no forman parte del alcance.
 
-### Organización del repositorio
+El frontend puede aplicar validaciones para mejorar la experiencia, pero no constituye la autoridad para permisos, tenant, dinero, inventario ni otras reglas críticas.
 
-El proyecto utilizará un monorepo sencillo con una separación explícita entre las aplicaciones y el código compartido.
+## Backend y API
 
-Estructura propuesta:
+El backend utilizará:
+
+- Node.js;
+- TypeScript;
+- Express;
+- API REST.
+
+Se organizará modularmente por dominio. Cuando corresponda, una solicitud seguirá el flujo:
+
+```text
+Route → Middleware → Controller → Service → Prisma
+```
+
+Responsabilidades principales:
+
+- **Route:** declara el endpoint y conecta los componentes necesarios.
+- **Middleware:** aplica controles transversales, incluida autenticación, autorización y contexto del tenant.
+- **Controller:** interpreta la solicitud HTTP, delega la operación y construye la respuesta.
+- **Service:** aplica las reglas de negocio y coordina transacciones, concurrencia e idempotencia.
+- **Prisma:** proporciona acceso persistente a PostgreSQL.
+
+No todas las operaciones necesitan obligatoriamente una capa artificial para cada paso. La organización debe conservar responsabilidades claras sin introducir abstracciones vacías.
+
+La validación de datos, autorización, aislamiento tenant y reglas de negocio se ejecutan en el backend. Los identificadores y valores enviados por el cliente no se consideran confiables hasta ser validados.
+
+## Persistencia
+
+La persistencia utilizará:
+
+- PostgreSQL 17 como mínimo recomendado y PostgreSQL 18 como preferencia para instalaciones nuevas, sujeto al hosting;
+- Prisma ORM;
+- una base de datos y un esquema compartidos entre los negocios;
+- UUID para los identificadores principales.
+
+`Business` define el límite tenant dentro del esquema compartido. La estrategia de defensa combina:
+
+- autenticación y autorización en el backend;
+- consultas acotadas al negocio autorizado;
+- validación de pertenencia en las reglas de dominio;
+- claves foráneas compuestas tenant-scoped cuando corresponda.
+
+Las FKs compuestas y sus claves candidatas aprobadas se documentan en el modelo relacional. En relaciones opcionales se complementan con `CHECK` de forma por la semántica `MATCH SIMPLE`. PostgreSQL es la fuente final de integridad referencial y Prisma representa las relaciones compatibles.
+
+La compatibilidad de FKs compuestas opcionales y múltiples relaciones entre las mismas entidades se comprobará con la versión concreta de Prisma. Cuando Prisma no pueda representar una relación con seguridad, la FK se conservará mediante SQL personalizado dentro de la migración oficial y las migraciones posteriores deberán verificarse para que no la eliminen inadvertidamente.
+
+Se utilizará una versión estable de Prisma compatible al comenzar la implementación y se verificará la versión exacta antes de instalar. Las tablas y columnas físicas utilizan `snake_case`; los modelos Prisma, `PascalCase`; y sus campos, `camelCase`, mediante `@map` y `@@map` cuando corresponda. `db push` no será el mecanismo de despliegue productivo.
+
+El inventario de SQL complementario incluye índices únicos parciales; `CHECK` aritméticos, de forma y de longitud del hash idempotente; restricciones del trial histórico y protección de `trialEndsAt`; triggers append-only; privilegios PostgreSQL; y FKs compuestas que Prisma no represente correctamente. No se genera ese SQL en la fase documental.
+
+No se permiten relaciones cruzadas entre negocios. Esto aplica al catálogo, ubicaciones, inventario, ventas, membresías, anulaciones, devoluciones, reembolsos y auditoría.
+
+Los registros históricos no se eliminan mediante cascadas destructivas para representar correcciones o reversiones. Productos, variantes, ubicaciones y proveedores pueden retirarse del uso operativo sin borrar su historial; las membresías se revocan conservando sus referencias.
+
+## Organización prevista del repositorio
+
+El proyecto utilizará un monorepo sencillo:
 
 ```text
 inventory-app/
@@ -45,128 +101,141 @@ inventory-app/
 └── package.json
 ```
 
-- `apps/web/` contendrá la aplicación frontend.
+- `apps/web/` contendrá el frontend.
 - `apps/api/` contendrá la API y la lógica del backend.
-- `packages/shared/` podrá contener elementos compartidos entre aplicaciones cuando corresponda.
-- `docs/` contendrá la documentación del proyecto.
+- `packages/shared/` contendrá elementos compartidos cuando exista una necesidad concreta.
+- `docs/` conserva las decisiones del producto y la arquitectura.
 
-Esta estructura es una referencia para la implementación posterior; este documento no crea todavía esas aplicaciones ni paquetes.
+Esta estructura está aprobada como organización prevista, pero su presencia en este documento no significa que las aplicaciones o paquetes ya estén implementados.
 
-### Organización del backend
+## Autenticación y autorización
 
-El backend se organizará de forma modular por dominio. Cuando corresponda, una solicitud seguirá el flujo:
+La autenticación será administrada por un proveedor especializado externo todavía no seleccionado. Inventory App no almacenará contraseñas.
 
-```text
-Route → Middleware → Controller → Service → Prisma
-```
+La identidad estable del usuario se relaciona mediante `issuer` y `externalSubject`. El correo es un dato opcional y no se utiliza por sí solo como identidad ni para vincular cuentas.
 
-Las responsabilidades serán:
-
-- **Route:** declarar el endpoint y conectar los componentes necesarios.
-- **Middleware:** ejecutar validaciones o controles transversales antes del controlador, incluida la autenticación y autorización cuando corresponda.
-- **Controller:** recibir la solicitud HTTP, delegar la operación y construir la respuesta HTTP.
-- **Service:** aplicar las reglas de negocio y coordinar las operaciones del dominio.
-- **Prisma:** acceder de forma persistente a PostgreSQL.
-
-No todas las operaciones necesitan obligatoriamente cada capa; el flujo se aplicará cuando corresponda sin perder la separación de responsabilidades.
-
-### Organización del frontend
-
-El frontend se organizará por funcionalidades o *features*. Cada funcionalidad agrupará los elementos relacionados con su responsabilidad dentro de la interfaz, evitando una organización global basada únicamente en el tipo técnico de archivo.
-
-### Multi-tenancy y aislamiento entre negocios
-
-La aplicación utilizará una base de datos y un esquema compartidos. `Business` será el tenant del sistema.
-
-La autorización y el aislamiento entre negocios deberán validarse siempre en el backend. El backend no confiará únicamente en un `businessId` enviado por el cliente para determinar a qué información puede acceder un usuario o qué operaciones puede realizar.
-
-La relación entre usuarios y negocios se representará mediante:
+La pertenencia y autorización se representan mediante:
 
 ```text
 User → BusinessMembership → Business
 ```
 
-Un usuario podrá pertenecer a varios negocios. El rol del usuario dentro de un negocio pertenecerá a la membresía correspondiente, no directamente al usuario.
+`BusinessMembership` contiene:
 
-Los roles iniciales serán:
+- rol `OWNER` o `EMPLOYEE`;
+- estado `ACTIVE` o `REVOKED`.
 
-- `OWNER`
-- `EMPLOYEE`
+Cada operación protegida debe validar en el backend la identidad, una membresía `ACTIVE`, el rol autorizado y el negocio correspondiente. Una membresía `REVOKED` pierde acceso aunque la sesión de autenticación continúe vigente.
 
-La V1 no incluirá permisos adicionales configurables ni un sistema RBAC configurable.
+Cada negocio debe conservar al menos un `OWNER ACTIVE`. La V1 no incluye permisos configurables ni un sistema RBAC adicional.
 
-### Suscripciones y planes
+Los controles detallados se documentan en `security.md` y `roles.md`.
 
-La suscripción del SaaS estará asociada a `Business`, no directamente a `User`. El dominio contemplará conceptualmente `Plan` y `Subscription`.
+## Suscripciones y facturación SaaS
 
-El trial inicial durará 30 días y `TRIALING` será un estado o concepto confirmado del ciclo de suscripción. Los demás estados y transiciones se definirán cuando se diseñe el dominio de billing y se evalúe el proveedor correspondiente.
+`Subscription` pertenece a `Business`, no a `User`. Un negocio conserva su historial de suscripciones, puede tener como máximo una abierta y puede consumir un único trial histórico.
 
-Una nueva dirección de correo no otorgará conceptualmente un nuevo trial de forma automática. El ciclo de trial y suscripción se gestionará alrededor del negocio y deberá conservarse la información necesaria para administrarlo correctamente.
+Los estados aprobados son:
 
-Los planes podrán definir capacidades o límites, incluida la cantidad de ubicaciones habilitadas. Todavía no se han definido precios, cantidad máxima de empleados, cantidad de ubicaciones del plan básico ni otros límites comerciales.
+- `TRIALING`;
+- `ACTIVE`;
+- `ENDED`.
 
-Las decisiones del dominio se detallan en `docs/subscriptions-and-billing.md`.
+El trial dura exactamente 30 × 24 horas. Su vencimiento debe evaluarse temporalmente aunque un proceso programado todavía no haya materializado el cambio de estado.
 
-### Ubicaciones
+Los cambios de plan preservan el historial mediante períodos de suscripción distintos. El fin de una suscripción no elimina inmediatamente los datos del negocio; la política posterior de acceso y conservación sigue pendiente.
 
-Cada negocio tendrá al menos una `Location` predeterminada.
+`Payment` pertenece exclusivamente a las ventas registradas por el negocio. La facturación SaaS constituye un dominio independiente, utilizará un proveedor todavía no seleccionado y no reutilizará esa entidad.
 
-La arquitectura y el modelo soportarán la relación `Business 1:N Location` desde la V1. La cantidad de ubicaciones que un negocio pueda utilizar podrá depender posteriormente de su `Plan`; este control comercial no cambia la capacidad del modelo para representar múltiples ubicaciones.
+Las reglas completas se documentan en `subscriptions-and-billing.md`.
 
-Inicialmente, una ubicación podrá representar:
+## Catálogo e inventario
 
-- `STORE`: tienda.
-- `WAREHOUSE`: almacén.
+`ProductVariant` es la unidad comercial e inventariable. Todo producto tiene al menos una variante; los productos simples utilizan una única variante sin atributos.
 
-Las ventas estarán asociadas a una ubicación.
+Cada variante referencia mediante UUID una unidad de un catálogo global controlado y define su granularidad decimal. La V1 no incorpora conversiones ni unidades secundarias.
 
-### Inventario
+Los atributos pertenecen a cada producto y sus variantes representan combinaciones completas y únicas. Los detalles funcionales se documentan en `product-variants.md`.
 
-`ProductVariant` continuará siendo la unidad inventariable. Sin embargo, el stock no pertenecerá directamente a `Product` ni se almacenará directamente en `ProductVariant`.
-
-`InventoryBalance` representará el saldo actual para una combinación de variante y ubicación:
+El stock actual corresponde siempre a una variante en una ubicación:
 
 ```text
 ProductVariant + Location → InventoryBalance
 ```
 
-Deberá existir unicidad conceptual entre `locationId` y `productVariantId`, de modo que haya un único saldo actual para cada combinación de ubicación y variante.
+`InventoryBalance` es el saldo materializado y `InventoryMovement` es el ledger histórico. Todo cambio de existencias genera un movimiento y ninguna operación puede producir stock negativo.
 
-`InventoryMovement` proporcionará la trazabilidad de los cambios de stock. El inventario seguirá una estrategia de:
+Las actualizaciones de saldo y sus movimientos deben ser atómicos. Los movimientos originales se conservan y las correcciones utilizan movimientos compensatorios. Las reglas completas se documentan en `inventory-rules.md`.
 
-```text
-Saldo materializado + libro de movimientos
-```
+## Ventas y reversiones
 
-El saldo materializado permitirá consultar las existencias actuales mediante `InventoryBalance`, mientras que el libro de movimientos conservará el historial mediante `InventoryMovement`.
+Una venta contiene sus detalles y uno o más pagos completos. Registrar una venta debe persistir atómicamente:
 
-Los cambios de inventario que formen parte de operaciones críticas deberán mantener consistencia transaccional. Esto incluye mantener coherentes el saldo actual y los movimientos generados por una misma operación.
+- la venta y sus detalles;
+- sus pagos;
+- los movimientos de salida;
+- las actualizaciones de inventario.
 
-### Facturación del SaaS
+La V1 contempla:
 
-Los pagos que un negocio registra por sus ventas pertenecen al dominio de ventas y se representan mediante `Payment`. La facturación y los pagos que el negocio realiza a Inventory App por su suscripción constituyen un dominio independiente y no reutilizarán `Payment`.
+- anulaciones completas;
+- devoluciones parciales o totales;
+- restitución diferenciada de mercancía vendible y no vendible;
+- reembolsos básicos sin modificar los pagos originales.
 
-La facturación del SaaS utilizará posteriormente un proveedor o pasarela externa todavía no seleccionada. Inventory App no almacenará directamente datos sensibles de tarjetas.
+Las ventas, anulaciones, devoluciones y reembolsos deben controlar concurrencia e idempotencia mediante registros tenant-scoped. Ajustes y stock inicial comparten esa protección. Los registros originales y movimientos históricos no se eliminan ni sobrescriben para representar una reversión.
 
-El backend no confiará únicamente en datos enviados por el frontend para confirmar el estado de un pago de suscripción. La confirmación deberá basarse en mecanismos confiables ofrecidos por el proveedor de pagos.
+Las relaciones y reglas detalladas se documentan en `conceptual-data-model.md` y `relational-data-model.md`.
 
-### Ciclo de vida de los datos
+## Convenciones transversales
 
-El vencimiento del trial o de una suscripción afectará el derecho de uso según la política de suscripción, pero no eliminará inmediatamente `Business`, productos, inventario, ventas ni otros datos del negocio.
+### Dinero y cantidades
 
-La política definitiva de acceso restringido, conservación, exportación y eventual eliminación continúa pendiente y no se define en esta etapa.
+El dinero y las cantidades utilizan representaciones decimales exactas. No se utilizan `float` ni `number` de JavaScript para cálculos financieros críticos.
 
-### Requisitos transversales
+Las precisiones, escalas y política de redondeo aprobadas se documentan en `non-functional-requirements.md` y `relational-data-model.md`.
 
-La seguridad, el aislamiento multi-tenant, la integridad del inventario, la auditoría y la mantenibilidad son requisitos del producto desde el diseño. Los principios de seguridad se detallan en `docs/security.md`.
+### Fechas y horas
 
-## Posibilidades de evolución futura
+- UTC es la referencia interna para persistencia y reglas temporales.
+- `America/Lima` es la zona horaria de presentación de la V1.
+- Se diferencia el momento efectivo de una operación del momento en que fue registrada.
 
-La V1 contempla conceptualmente planes, suscripciones y el trial. La arquitectura deberá permitir una evolución posterior hacia:
+### Operaciones críticas
 
-- transferencias entre ubicaciones;
-- planes superiores concretos que habiliten el uso de más ubicaciones u otras capacidades, junto con límites y configuraciones comerciales todavía no definidos, sin alterar el aislamiento del tenant;
-- permisos más granulares o un modelo de permisos/RBAC configurable, si existe una necesidad real;
-- capacidades offline, incluido almacenamiento local y sincronización.
+Inventario, ventas, anulaciones, devoluciones y reembolsos requieren:
 
-Estas extensiones concretas no forman parte de la implementación de la V1 y no deben interpretarse como requisitos actuales. Esta condición no excluye de la V1 los conceptos de `Plan`, `Subscription`, trial de 30 días y estado `TRIALING` definidos en este documento.
+- transacciones atómicas;
+- control de concurrencia;
+- idempotencia tenant-scoped cuando corresponda;
+- validación en backend;
+- trazabilidad y conservación histórica.
+
+La V1 utiliza `READ COMMITTED` como nivel base y combina restricciones únicas, actualizaciones condicionales atómicas, locks de filas, orden determinista y reintentos controlados. La persistencia de idempotencia ya forma parte del modelo relacional y conserva exclusivamente operaciones completadas, sin columna de estado.
+
+El servicio serializa cada clave idempotente mediante un advisory transaction lock derivado de `businessId + scope + key`, adquirido antes de cualquier efecto comercial y mediante una consulta parametrizada en el mismo cliente transaccional de Prisma. Tras adquirirlo consulta siempre la clave completa; el lock no sustituye la restricción única. La derivación exacta del identificador y la canonicalización del hash permanecen pendientes para la preparación de la implementación.
+
+La aplicación y las migraciones utilizan roles PostgreSQL separados. El rol de aplicación aplica mínimos privilegios y no es propietario de las tablas; el rol de migración conserva DDL controlado. `InventoryMovement` y `AuditLog` tienen protección append-only mediante privilegios y triggers para la operación ordinaria.
+
+## Decisiones pendientes
+
+- Proveedor de autenticación y detalles de integración.
+- Proveedor de facturación SaaS y confirmación confiable de activación.
+- Precios, periodicidad, límites y capacidades comerciales de los planes.
+- Política de acceso y conservación después de finalizar una suscripción.
+- Canonicalización exacta del hash idempotente, derivación del identificador del advisory lock y detalle de locking de los demás flujos.
+- Catálogo inicial de unidades y valores predeterminados de granularidad.
+- Métricas operativas e infraestructura de despliegue.
+
+No deben inferirse mecanismos, garantías ni condiciones comerciales hasta que sean aprobados.
+
+## Referencias
+
+- [Modelo conceptual](conceptual-data-model.md)
+- [Modelo relacional](relational-data-model.md)
+- [Seguridad](security.md)
+- [Requisitos no funcionales](non-functional-requirements.md)
+- [Roles y membresías](roles.md)
+- [Productos y variantes](product-variants.md)
+- [Reglas de inventario](inventory-rules.md)
+- [Suscripciones y facturación](subscriptions-and-billing.md)

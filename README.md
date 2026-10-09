@@ -1,33 +1,89 @@
 # Inventory App
 
-SaaS comercial multiempresa por suscripción para la gestión de inventario y ventas, orientado a pequeños negocios.
+Inventory App es un proyecto de SaaS comercial multiempresa para gestionar catálogo, inventario y ventas de pequeños negocios desde una aplicación web responsive.
 
-## Objetivo
+## Problema que busca resolver
 
-Ofrecer una solución web responsive que permita gestionar productos, variantes, inventario, ventas y usuarios desde computadoras y dispositivos móviles. Cada `Business` constituye un tenant operativo y su suscripción se administra a nivel del negocio.
+Muchos negocios necesitan conocer qué productos y variantes tienen disponibles en cada ubicación, registrar ventas con trazabilidad y conservar un historial confiable de cambios de stock.
 
-La autenticación será gestionada mediante un proveedor externo todavía no seleccionado y requerirá que el usuario verifique su correo electrónico.
+Inventory App plantea una solución centralizada que separa el catálogo general de sus variantes, controla existencias por ubicación y mantiene coherencia entre ventas, pagos y movimientos de inventario.
 
-## Alcance inicial
+## Enfoque SaaS multiempresa
 
-La primera versión contempla:
+Cada `Business` representa un tenant operativo. Un usuario puede pertenecer a varios negocios mediante membresías con rol y estado propios.
 
-- Roles de dueño y empleado.
-- Gestión de productos y variantes.
-- Control de inventario.
-- Historial de movimientos.
-- Gestión de proveedores.
-- Registro de ventas.
-- Lectura de códigos de barras.
-- Impresión de tickets mediante impresora térmica.
-- Dashboard y reportes.
-- Soporte para múltiples negocios.
-- Planes y suscripciones asociados al negocio.
-- Trial inicial de 30 días.
-- Soporte arquitectónico para múltiples ubicaciones por negocio.
+La autorización se valida en el backend y todos los datos operativos deben permanecer aislados por negocio. Las suscripciones también pertenecen a `Business`, no directamente a los usuarios.
 
-Los precios, límites comerciales y proveedores externos de autenticación y facturación todavía no han sido definidos.
+## Alcance diseñado para la V1
 
-## Estado
+La documentación actual contempla:
 
-🚧 Proyecto en planificación y desarrollo.
+- roles `OWNER` y `EMPLOYEE` con membresías activas o revocadas;
+- múltiples negocios y múltiples ubicaciones por negocio;
+- categorías, productos, variantes y atributos configurables;
+- productos simples y productos con combinaciones de atributos;
+- SKU y códigos de barras opcionales;
+- proveedores como catálogo básico;
+- inventario por variante y ubicación;
+- saldos actuales e historial de movimientos;
+- registro de ventas con uno o más pagos;
+- anulaciones, devoluciones parciales o totales y reembolsos básicos;
+- impresión de tickets, dashboard y reportes como parte del alcance funcional previsto;
+- planes, historial de suscripciones y un trial único de 30 × 24 horas por negocio;
+- preparación arquitectónica para PWA, sin sincronización offline automática en V1.
+
+Los proveedores externos de autenticación y facturación, precios de planes, límites comerciales y políticas posteriores al fin de una suscripción todavía no han sido seleccionados o definidos.
+
+## Stack aprobado
+
+- **Frontend:** React, TypeScript, Vite y Tailwind CSS.
+- **Backend:** Node.js, TypeScript, Express y API REST.
+- **Persistencia:** PostgreSQL y Prisma ORM.
+- **Arquitectura:** monorepo, backend modular y base de datos compartida con aislamiento tenant-scoped.
+
+## Estructura prevista
+
+```text
+inventory-app/
+├── apps/
+│   ├── web/
+│   └── api/
+├── packages/
+│   └── shared/
+└── docs/
+```
+
+- `apps/web`: aplicación frontend.
+- `apps/api`: API y reglas de negocio.
+- `packages/shared`: código compartido cuando exista una necesidad concreta.
+- `docs`: decisiones funcionales, arquitectónicas y de datos.
+
+Esta es la estructura aprobada para la implementación futura; todavía no se encuentra creada en el repositorio.
+
+## Estado actual
+
+El proyecto se encuentra en fase de diseño y consolidación documental.
+
+Actualmente están documentados la arquitectura, los modelos conceptual y relacional, y las reglas principales de seguridad, suscripciones, roles, variantes, inventario y ventas. Todavía no existen una aplicación frontend funcional, una API operativa, un esquema Prisma, migraciones de base de datos ni un despliegue.
+
+Por ese motivo, aún no hay instrucciones de instalación o ejecución de aplicaciones.
+
+## Documentación
+
+- [Arquitectura](docs/architecture.md)
+- [Modelo conceptual](docs/conceptual-data-model.md)
+- [Modelo relacional](docs/relational-data-model.md)
+- [Seguridad](docs/security.md)
+- [Requisitos no funcionales](docs/non-functional-requirements.md)
+- [Roles y membresías](docs/roles.md)
+- [Productos y variantes](docs/product-variants.md)
+- [Reglas de inventario](docs/inventory-rules.md)
+- [Suscripciones y facturación](docs/subscriptions-and-billing.md)
+
+## Principios del proyecto
+
+- seguridad y aislamiento multiempresa desde el diseño;
+- integridad transaccional del inventario y las ventas;
+- conservación de trazabilidad e historial;
+- separación entre pagos comerciales y facturación SaaS;
+- implementación incremental, mantenible y orientada al aprendizaje.
