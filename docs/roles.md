@@ -67,6 +67,20 @@ La autorización debe comprobar:
 
 Un `businessId` recibido del cliente no concede acceso por sí solo.
 
+## Acceso comercial durante la suspensión
+
+La membresía `ACTIVE` es necesaria, pero no suficiente, para ejecutar operaciones: el backend también evalúa la condición efectiva de acceso de la suscripción del `Business`.
+
+Durante las 72 horas de gracia posteriores exclusivamente al vencimiento de cobertura pagada, `OWNER` y `EMPLOYEE` conservan sus permisos operativos normales y reciben avisos de renovación.
+
+Una vez suspendido el acceso:
+
+- `OWNER` puede iniciar sesión, consultar productos, inventario y ventas en modo lectura, exportar datos de su propio negocio, consultar el estado de la suscripción, renovarla y cerrar sesión;
+- `OWNER` no puede registrar ventas, anulaciones, devoluciones, reembolsos, movimientos o ajustes de inventario, ni modificar productos, variantes, ubicaciones, membresías u otros datos comerciales o administrativos;
+- `EMPLOYEE` solo puede autenticarse, ver el aviso de suspensión y cerrar sesión; no puede consultar ni exportar datos comerciales, renovar ni ejecutar operaciones.
+
+Estos permisos no conceden administración de la plataforma ni acceso a otros negocios. La suspensión no revoca membresías ni elimina operaciones históricas.
+
 ## Decisiones pendientes
 
 - Flujo de invitación a un negocio.

@@ -11,6 +11,7 @@ Este documento presenta las entidades principales de Inventory App, sus relacion
 - `BusinessMembership`
 - `Plan`
 - `Subscription`
+- `SubscriptionPayment`
 - `Location`
 
 ### Catálogo
@@ -70,28 +71,41 @@ La autenticación de `User` será administrada por un proveedor externo todavía
 
 ## Planes, suscripciones y trial
 
-`Plan` representa una oferta del SaaS. Puede ser referenciado por múltiples suscripciones y permanece separado de los pagos de ventas del negocio.
+`Plan` representa una oferta del SaaS. Puede ser referenciado por múltiples suscripciones y permanece separado de los pagos de ventas del negocio. La V1 ofrece únicamente `Esencial`, con precio anunciado de S/ 99.90 por un período fijo de 30 × 24 horas, con IGV incluido cuando corresponda.
 
 Las relaciones conceptuales son:
 
 ```text
 Business 1:N Subscription N:1 Plan
+Subscription 1:N SubscriptionPayment
 ```
 
 Un negocio conserva el historial de suscripciones, con estas reglas:
 
 - puede tener como máximo una suscripción abierta a la vez;
 - puede consumir un único trial histórico;
-- el trial dura exactamente 30 × 24 horas;
+- el trial dura exactamente 30 × 24 horas, no produce cobro automático y no tiene período de gracia;
 - una nueva dirección de correo no concede otro trial;
-- los estados mínimos son `TRIALING`, `ACTIVE` y `ENDED`;
-- las transiciones mínimas son `TRIALING → ACTIVE`, `TRIALING → ENDED` y `ACTIVE → ENDED`;
-- una suscripción terminada no se reabre: una reactivación posterior crea un nuevo período histórico;
-- un cambio efectivo de plan conserva el historial del plan anterior.
+- la contratación o renovación exige consentimiento del cliente;
+- los estados físicos son `TRIALING`, `ACTIVE` y `ENDED`;
+- `ACTIVE` representa una relación pagada abierta y no basta por sí solo para demostrar acceso operativo vigente;
+- `TRIAL_ACCESS`, `PAID_ACCESS`, `GRACE_PERIOD` y `SUSPENDED` son condiciones efectivas derivadas del estado físico, los límites temporales y el tiempo autoritativo;
+- la gracia solo sigue al vencimiento de cobertura pagada, dura exactamente 3 × 24 horas y no modifica el trial;
+- una renovación conserva el historial comercial, los cobros y los períodos cubiertos.
 
-El vencimiento del trial o la finalización de una suscripción afecta el derecho de uso, pero no elimina inmediatamente el negocio ni sus productos, inventario, ventas u otros datos. La política de acceso restringido y conservación posterior continúa pendiente.
+La cobertura pagada utiliza `currentPeriodEndsAt` como límite superior exclusivo. Cada contratación o renovación confirmada agrega un período fijo de 720 horas conforme a las reglas de renovación aprobadas. El backend deriva el acceso en cada operación protegida, sin depender de procesos programados para materializar vencimientos.
 
-Los planes podrán definir capacidades o límites comerciales, incluida la cantidad de ubicaciones habilitadas, sin cambiar la relación operativa `Business 1:N Location`. Los precios, límites y capacidades concretas todavía no están definidos.
+Durante la gracia el negocio continúa operando y recibe avisos. Tras 72 horas sin renovación confirmada, una membresía `OWNER ACTIVE` conserva lectura y exportación de los datos de su negocio y acceso a la renovación, pero no puede efectuar modificaciones operativas o administrativas. Una membresía `EMPLOYEE ACTIVE` solo puede autenticarse, ver el aviso y cerrar sesión. La suspensión no elimina datos, historial ni membresías.
+
+`SubscriptionPayment` registra cobros confirmados del negocio a Inventory App, los períodos de cobertura adquiridos y snapshots de las condiciones monetarias aplicadas. Se mantiene separado de `Payment`, que representa exclusivamente cobros de ventas realizados por el negocio. Los intentos pendientes, fallidos, rechazados o revertidos no amplían cobertura y su modelo permanece pendiente.
+
+Las capacidades configurables de planes futuros no se modelan mediante `PlanFeature` en la V1. Los límites concretos de usuarios y demás recursos de `Esencial` siguen pendientes. Seguridad, integridad, aislamiento multi-tenant y respaldos son garantías comunes, no funcionalidades opcionales de un plan.
+
+### Administración de plataforma
+
+La administración de Inventory App es un ámbito independiente del tenant. Los roles `OWNER` y `EMPLOYEE` solo expresan permisos dentro de un `Business` y nunca conceden administración de la plataforma, planes globales, pagos SaaS ni otros negocios.
+
+No se incorpora todavía una entidad ni un rol definitivo de administrador de plataforma. Su identidad, autorización, auditoría y operaciones permitidas deberán diseñarse separadamente antes de implementarse.
 
 ## Ubicaciones y catálogo
 
@@ -188,7 +202,7 @@ Cada `SaleItem` conserva la cantidad, el precio de lista histórico, el descuent
 
 La suma de los pagos debe cubrir exactamente el total de la venta. El modelo permite múltiples pagos por venta, pero no contempla ventas a crédito ni pagos parciales en la V1.
 
-`Payment` representa exclusivamente pagos que el negocio registra por sus ventas. Los cobros que Inventory App realiza por la suscripción SaaS pertenecen a otro dominio y no reutilizan esta entidad.
+`Payment` representa exclusivamente pagos que el negocio registra por sus ventas. Los cobros que Inventory App realiza por la suscripción SaaS pertenecen a `SubscriptionPayment` y no reutilizan esta entidad.
 
 Registrar una venta debe conservar atómicamente la venta, sus detalles, sus pagos, los movimientos de salida y los nuevos saldos de inventario. Una reducción nunca puede producir stock negativo.
 
@@ -281,9 +295,15 @@ Permanecen sin definición funcional completa:
 
 - proveedor externo de autenticación y reglas futuras para vincular más de una identidad a un usuario;
 - sincronización de datos de perfil del proveedor de autenticación;
-- proveedor de facturación SaaS y evento confiable que activa una suscripción;
-- precios, periodicidad, límites y capacidades comerciales concretas de los planes;
-- política de acceso restringido, conservación, exportación y eventual eliminación después de finalizar una suscripción;
+- proveedor de facturación SaaS y evento confiable que confirma un cobro, renovación o activación;
+- modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos;
+- tratamiento fiscal y snapshots definitivos de IGV;
+- política de cancelación voluntaria, cierre como `ENDED` y reactivación después de un cierre definitivo;
+- límites de usuarios y demás capacidades concretas de `Esencial`;
+- política de conservación y eventual eliminación de datos a largo plazo;
+- reglas de precios futuros y cambios de plan;
+- atributos de integración externa de `SubscriptionPayment` cuando se seleccione el proveedor;
+- modelo de identidad, autorización y auditoría para la administración de plataforma;
 - catálogo inicial de unidades y valores predeterminados de granularidad;
 - canonicalización exacta de atributos y valores cuando se apruebe una regla de equivalencia; las reglas de categoría, SKU y código de barras ya están definidas en el modelo relacional;
 - comportamiento operativo detallado de productos, variantes, ubicaciones y proveedores inactivos;

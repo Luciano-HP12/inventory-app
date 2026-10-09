@@ -143,9 +143,15 @@ Los estados aprobados son:
 
 El trial dura exactamente 30 × 24 horas. Su vencimiento debe evaluarse temporalmente aunque un proceso programado todavía no haya materializado el cambio de estado.
 
-Los cambios de plan preservan el historial mediante períodos de suscripción distintos. El fin de una suscripción no elimina inmediatamente los datos del negocio; la política posterior de acceso y conservación sigue pendiente.
+El trial no tiene gracia ni genera cobros automáticos. `ACTIVE` representa una relación pagada abierta y utiliza `currentPeriodEndsAt` como límite superior exclusivo de la cobertura. Cada período pagado dura exactamente 30 × 24 horas.
 
-`Payment` pertenece exclusivamente a las ventas registradas por el negocio. La facturación SaaS constituye un dominio independiente, utilizará un proveedor todavía no seleccionado y no reutilizará esa entidad.
+`TRIAL_ACCESS`, `PAID_ACCESS`, `GRACE_PERIOD` y `SUSPENDED` son condiciones efectivas derivadas, no estados persistidos. La gracia solo sigue a cobertura pagada, dura exactamente 72 horas desde `currentPeriodEndsAt` y conserva la operación normal. Después, la política de suspensión aplica permisos diferenciados a `OWNER` y `EMPLOYEE`. El backend evalúa estas condiciones para cada operación protegida usando tiempo autoritativo; los jobs programados no determinan el acceso.
+
+Las renovaciones requieren consentimiento y confirmación confiable. Antes del vencimiento o durante la gracia agregan 720 horas desde el límite de cobertura anterior; después de la suspensión agregan 720 horas desde la confirmación. Los cobros confirmados y los períodos cubiertos se conservan en `SubscriptionPayment`, separado de los pagos de ventas. La suspensión no elimina datos, historial ni membresías.
+
+Los cambios de plan preservan el historial mediante períodos de suscripción distintos. Las reglas futuras de precios y cambios de plan permanecen pendientes.
+
+`Payment` pertenece exclusivamente a las ventas registradas por el negocio. La facturación SaaS constituye un dominio independiente, utiliza `SubscriptionPayment` para cobros confirmados y no reutiliza esa entidad. El proveedor y el modelo de intentos no confirmados todavía no están seleccionados.
 
 Las reglas completas se documentan en `subscriptions-and-billing.md`.
 
@@ -220,9 +226,12 @@ La aplicación y las migraciones utilizan roles PostgreSQL separados. El rol de 
 ## Decisiones pendientes
 
 - Proveedor de autenticación y detalles de integración.
-- Proveedor de facturación SaaS y confirmación confiable de activación.
-- Precios, periodicidad, límites y capacidades comerciales de los planes.
-- Política de acceso y conservación después de finalizar una suscripción.
+- Proveedor de facturación SaaS, evento confiable de confirmación e integración externa.
+- Modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos.
+- Tratamiento fiscal y snapshots definitivos de IGV.
+- Límites y capacidades comerciales de los planes; `PlanFeature` queda fuera de la V1 implementable.
+- Cancelación voluntaria, cierre como `ENDED`, reactivación posterior y conservación de datos a largo plazo.
+- Administración interna de la plataforma y reglas futuras de precios o cambios de plan.
 - Canonicalización exacta del hash idempotente, derivación del identificador del advisory lock y detalle de locking de los demás flujos.
 - Catálogo inicial de unidades y valores predeterminados de granularidad.
 - Métricas operativas e infraestructura de despliegue.

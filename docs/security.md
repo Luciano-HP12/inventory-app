@@ -123,6 +123,18 @@ Inventory App no almacenará directamente datos sensibles de tarjetas. La factur
 
 El backend no confiará únicamente en información enviada por el frontend para confirmar pagos o activar una suscripción. La confirmación deberá proceder de mecanismos confiables del proveedor elegido.
 
+Los cobros confirmados de suscripción se registran en `SubscriptionPayment`, separado de `Payment`. La confirmación del cobro, el período cubierto y la ampliación de `Subscription.currentPeriodEndsAt` deben ser transaccionales e idempotentes. Los intentos pendientes, fallidos o rechazados no conceden ni amplían acceso.
+
+## Autorización comercial por suscripción
+
+Los estados físicos de `Subscription` son `TRIALING`, `ACTIVE` y `ENDED`. El backend deriva `TRIAL_ACCESS`, `PAID_ACCESS`, `GRACE_PERIOD` o `SUSPENDED` usando el estado, los límites temporales y tiempo autoritativo para cada operación protegida; no confía en un job programado ni en un valor enviado por el cliente.
+
+El trial termina exactamente en `trialEndsAt`, no tiene gracia y no genera cobros automáticos. La gracia dura exactamente 72 horas y solo se calcula después de `currentPeriodEndsAt` de una suscripción pagada. Al terminar sin renovación confirmada, se aplica la política de suspensión documentada en `roles.md`.
+
+Durante la suspensión, las consultas y exportaciones permitidas a `OWNER` siguen acotadas al `Business` autorizado. La condición suspendida nunca concede acceso transversal ni sustituye las validaciones de identidad, membresía `ACTIVE` y rol. `EMPLOYEE` no accede a datos comerciales durante la suspensión.
+
+La administración interna de la plataforma es un ámbito separado. Los roles `OWNER` y `EMPLOYEE` no otorgan administración global ni acceso implícito a otros negocios.
+
 Las credenciales, secretos y datos sensibles no deben exponerse en código, registros, documentación, repositorios ni respuestas al cliente.
 
 ## Prevención gradual de abuso
@@ -146,5 +158,7 @@ Los controles de autenticación, autorización, tenant, validación, transaccion
 - Canonicalización del hash idempotente y detalle de locking por operación dentro de la estrategia aprobada.
 - Catálogo definitivo y política de retención de auditoría.
 - Proveedor de facturación SaaS y mecanismo confiable de confirmación.
+- Modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos e idempotencia de eventos del proveedor.
+- Identidad, autorización, auditoría y alcance de la administración interna de la plataforma.
 
 No se presuponen MFA, políticas de recuperación ni mecanismos antifraude adicionales mientras no sean aprobados.

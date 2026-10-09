@@ -29,10 +29,21 @@ La documentación actual contempla:
 - registro de ventas con uno o más pagos;
 - anulaciones, devoluciones parciales o totales y reembolsos básicos;
 - impresión de tickets, dashboard y reportes como parte del alcance funcional previsto;
-- planes, historial de suscripciones y un trial único de 30 × 24 horas por negocio;
+- membresías por negocio y suscripción SaaS al plan inicial `Esencial`;
+- prueba gratuita única de 30 × 24 horas, sin cobro automático ni período de gracia;
+- períodos pagados de 30 × 24 horas, renovaciones consentidas y 72 horas de gracia exclusivamente después de su vencimiento;
+- suspensión con acceso de lectura y exportación para `OWNER`, sin eliminación automática de datos;
 - preparación arquitectónica para PWA, sin sincronización offline automática en V1.
 
-Los proveedores externos de autenticación y facturación, precios de planes, límites comerciales y políticas posteriores al fin de una suscripción todavía no han sido seleccionados o definidos.
+El precio anunciado de `Esencial` es S/ 99.90 por cada período fijo de 30 × 24 horas, con IGV incluido cuando corresponda. No se utilizan meses calendario. Los estados físicos de suscripción continúan siendo `TRIALING`, `ACTIVE` y `ENDED`; la gracia y la suspensión se derivan en el backend según el tiempo real. La pasarela de pagos, los límites comerciales, el tratamiento fiscal definitivo y la política de conservación a largo plazo todavía no están definidos.
+
+## Roadmap comercial
+
+- **V1:** lanzamiento con un único plan `Esencial` y las capacidades funcionales documentadas para inventario y ventas.
+- **Evaluación inicial:** observación del uso y feedback de clientes reales durante aproximadamente tres meses.
+- **Versiones posteriores:** definición de planes superiores y capacidades configurables a partir de evidencia real, sin comprometer anticipadamente precios ni características.
+
+La seguridad, integridad, aislamiento multiempresa y respaldos son requisitos comunes a todos los planes y no se degradan como características comerciales opcionales.
 
 ## Stack aprobado
 

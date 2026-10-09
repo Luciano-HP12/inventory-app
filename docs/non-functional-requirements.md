@@ -113,11 +113,15 @@ Los pagos de ventas registrados por un negocio y la facturación de suscripcione
 
 La facturación SaaS utilizará un proveedor externo todavía no seleccionado. Inventory App no almacenará directamente datos sensibles de tarjetas y no considerará confirmado un pago o activada una suscripción basándose únicamente en información enviada por el frontend.
 
+`SubscriptionPayment` conserva cobros SaaS confirmados, sus importes y períodos cubiertos; no reutiliza `Payment`. La confirmación confiable, la creación del registro y la ampliación de `currentPeriodEndsAt` deben ser atómicas e idempotentes. Los intentos pendientes, fallidos o rechazados no amplían cobertura.
+
 ## Onboarding, trial y ciclo de datos
 
-El trial dura exactamente 30 × 24 horas, es único por negocio y no se renueva por utilizar otro correo. Su vencimiento debe evaluarse temporalmente aunque un proceso programado todavía no haya actualizado el estado de la suscripción.
+El trial dura exactamente 30 × 24 horas, es único por negocio, no tiene gracia y no se renueva por utilizar otro correo. Su vencimiento debe evaluarse temporalmente aunque un proceso programado todavía no haya actualizado el estado de la suscripción.
 
-El vencimiento del trial o de una suscripción no elimina inmediatamente los datos del negocio. La política definitiva de acceso restringido, conservación, exportación y eventual eliminación sigue pendiente.
+Cada período pagado dura exactamente 30 × 24 horas. Su límite superior exclusivo es `currentPeriodEndsAt`; después existe una gracia exclusiva de suscripciones pagadas de exactamente 3 × 24 horas. El backend deriva el acceso vigente, la gracia o la suspensión usando tiempo autoritativo en cada operación protegida, sin depender de procesos programados.
+
+La suspensión aplica la política diferenciada de `OWNER` y `EMPLOYEE`, pero no elimina datos, historial ni membresías. La política de conservación y eventual eliminación a largo plazo sigue pendiente.
 
 La V1 no aplicará por defecto bloqueos agresivos basados en nombre comercial, dirección IP, dispositivo u otros mecanismos similares. El nombre comercial no se utilizará como identificador globalmente único.
 
@@ -152,7 +156,10 @@ Posibles evoluciones futuras ya identificadas, pero fuera del alcance actual, in
 - Mecanismo concreto de locking y orden de adquisición por operación dentro de la estrategia aprobada; para idempotencia queda pendiente la derivación exacta del identificador del advisory lock.
 - Canonicalización exacta del hash idempotente.
 - Catálogo inicial de unidades y valores predeterminados de `quantityStep`.
-- Política de acceso y ciclo de vida de datos después de finalizar una suscripción.
+- Proveedor y evento confiable de confirmación de cobros SaaS; modelo de intentos pendientes, fallidos, rechazados o revertidos.
+- Tratamiento fiscal y snapshots definitivos de IGV.
+- Cancelación voluntaria, cierre como `ENDED`, reactivación posterior y conservación de datos a largo plazo.
+- Administración interna de la plataforma, límites comerciales y reglas futuras de precios o cambios de plan.
 - Métricas futuras de disponibilidad, rendimiento, capacidad, RPO y RTO.
 - Infraestructura y estrategia de despliegue.
 

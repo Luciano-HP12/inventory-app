@@ -30,7 +30,7 @@ Las claves primarias principales utilizarán UUID. Los nombres de atributos son 
 
 La estrategia relacional aprobada distingue:
 
-- Entidades tenant-scoped con `businessId` directo: `BusinessMembership`, `Subscription`, `Location`, `Category`, `Product`, `ProductVariant`, `InventoryBalance`, `InventoryMovement`, `Sale`, `SaleItem`, `SaleCancellation`, `SaleReturn`, `Refund`, `Supplier`, `AuditLog` e `IdempotencyRecord`.
+- Entidades tenant-scoped con `businessId` directo: `BusinessMembership`, `Subscription`, `SubscriptionPayment`, `Location`, `Category`, `Product`, `ProductVariant`, `InventoryBalance`, `InventoryMovement`, `Sale`, `SaleItem`, `SaleCancellation`, `SaleReturn`, `Refund`, `Supplier`, `AuditLog` e `IdempotencyRecord`.
 - Entidades cuyo tenant se deriva de una relación obligatoria: `Attribute` mediante `Product`; `AttributeValue` mediante `Attribute`; `ProductVariantAttributeValue` mediante la variante y el valor; `Payment` mediante `Sale`; y `SaleReturnItem` mediante `SaleReturn` y `SaleItem`.
 - Entidades globales o no pertenecientes a un tenant: `User`, `Plan` y `UnitOfMeasure`. `Business` es la raíz del tenant.
 
@@ -45,6 +45,7 @@ Las siguientes claves candidatas existen para ser destino de las FKs compuestas 
 | Entidad destino | Clave candidata aprobada | Relaciones que la requieren |
 | --- | --- | --- |
 | `BusinessMembership` | `(businessId, id)` | Movimientos, ventas, anulaciones, devoluciones, reembolsos y auditorías realizados por una membresía del mismo negocio. |
+| `Subscription` | `(businessId, id)` | Cobros de suscripción pertenecientes al mismo negocio. |
 | `Location` | `(businessId, id)` | Saldos, movimientos y ventas del mismo negocio. |
 | `Category` | `(businessId, id)` | Categoría opcional de un producto del mismo negocio. |
 | `Product` | `(businessId, id)` | Variantes del mismo negocio. |
@@ -68,6 +69,7 @@ Las FKs tenant-scoped y de coherencia derivada aprobadas son:
 | Entidad origen | Columnas de origen | Entidad y columnas de destino |
 | --- | --- | --- |
 | `Product` | `(businessId, categoryId)` | `Category(businessId, id)` |
+| `SubscriptionPayment` | `(businessId, subscriptionId)` | `Subscription(businessId, id)` |
 | `ProductVariant` | `(businessId, productId)` | `Product(businessId, id)` |
 | `InventoryBalance` | `(businessId, productVariantId)` | `ProductVariant(businessId, id)` |
 | `InventoryBalance` | `(businessId, locationId)` | `Location(businessId, id)` |
@@ -115,7 +117,7 @@ Las FKs compuestas opcionales utilizan la semántica `MATCH SIMPLE` de PostgreSQ
 | --- | --- | --- | --- |
 | Entidades tenant-scoped → `Business` | `RESTRICT` | `RESTRICT` | El tenant y su pertenencia son inmutables; no se permite borrar transitivamente sus datos. |
 | `BusinessMembership` → `User` | `RESTRICT` | `RESTRICT` | La membresía y sus operaciones históricas deben conservar al usuario referenciado. |
-| `Subscription` → `Plan` | `RESTRICT` | `RESTRICT` | Un plan referenciado forma parte del historial comercial. |
+| `Subscription` → `Plan` y `SubscriptionPayment` → `Subscription` | `RESTRICT` | `RESTRICT` | El plan, la suscripción, los cobros y sus períodos cubiertos forman parte del historial comercial. |
 | Catálogo y asociaciones de variantes | `RESTRICT` | `RESTRICT` | Productos, variantes, atributos, valores y combinaciones con historial no se destruyen en cascada. |
 | Inventario → variante, ubicación y membresía | `RESTRICT` | `RESTRICT` | Saldos y ledger deben conservar referencias estables. |
 | Ventas, pagos y reversiones | `RESTRICT` | `RESTRICT` | Los registros originales y compensatorios forman historial inmutable. |
@@ -133,7 +135,7 @@ Prisma puede representar las PK simples, claves candidatas `@@unique` y FKs comp
 ### Conservación histórica y ciclo de vida
 
 - No se adopta un `soft delete` universal.
-- No se utilizará eliminación en cascada para borrar registros históricos de inventario, ventas, pagos, anulaciones, devoluciones, reembolsos, suscripciones o auditoría.
+- No se utilizará eliminación en cascada para borrar registros históricos de inventario, ventas, pagos, anulaciones, devoluciones, reembolsos, suscripciones, cobros SaaS o auditoría.
 - Productos, variantes, ubicaciones y proveedores se retiran del uso operativo mediante su estado o indicador de actividad, conservando las referencias históricas.
 - Las membresías se revocan mediante el estado `REVOKED`; no se eliminan cuando son referenciadas por registros históricos.
 - Una categoría puede eliminarse sin borrar sus productos: los productos relacionados conservan su historial y pasan a `categoryId = null`.
@@ -280,7 +282,7 @@ Representar la pertenencia de un `User` a un `Business` y el rol que ese usuario
 
 ### Propósito
 
-Representar una oferta del SaaS y, conceptualmente, las capacidades o límites comerciales aplicables a una suscripción.
+Representar una oferta comercial del SaaS. La V1 utiliza únicamente el plan `Esencial`.
 
 ### Atributos actualmente aprobados
 
@@ -292,7 +294,7 @@ Representar una oferta del SaaS y, conceptualmente, las capacidades o límites c
 | `isActive` | Booleano | Indica si el plan puede utilizarse para nuevas suscripciones. |
 | `createdAt` | `TIMESTAMPTZ(3)` | Momento en que se creó el plan. |
 
-No se definen todavía precios, límites concretos, columnas de *entitlements* ni valores para capacidades comerciales.
+El precio anunciado de `Esencial` es S/ 99.90 por cada período fijo de 30 × 24 horas, con IGV incluido cuando corresponda. Este dato comercial no permite reconstruir cobros históricos: cada cobro confirmado conserva su propio importe y condiciones monetarias. No se agregan por ahora columnas de *entitlements* ni una entidad `PlanFeature` implementable.
 
 ### Clave primaria
 
@@ -309,6 +311,7 @@ No se definen todavía precios, límites concretos, columnas de *entitlements* n
 - `code` es obligatorio, globalmente único y estable. No debe reutilizarse para representar otro plan.
 - `name` puede cambiar y no actúa como identificador estable ni necesita ser único.
 - `isActive = false` impide seleccionar el plan para nuevas suscripciones, pero no elimina ni invalida las suscripciones históricas que lo referencian.
+- La seguridad, integridad, separación tenant y política de respaldos no son capacidades opcionales del plan.
 
 ### Cardinalidades
 
@@ -316,10 +319,9 @@ No se definen todavía precios, límites concretos, columnas de *entitlements* n
 
 ### Decisiones pendientes
 
-- Precios, moneda, periodicidad y duración contractual.
 - Límites de ubicaciones, empleados u otras capacidades.
-- Representación futura de capacidades o *entitlements*.
-- Reglas futuras de versionado cuando existan precios, límites o condiciones comerciales concretas.
+- Representación futura de capacidades o *entitlements* cuando existan planes superiores aprobados.
+- Representación física del precio comercial vigente y reglas futuras de versionado o cambios de precio; los snapshots históricos pertenecen a los cobros.
 
 ## Subscription
 
@@ -337,6 +339,7 @@ Representar el ciclo de trial y suscripción SaaS de un `Business`. Pertenece al
 | `status` | Enum conceptual | Estado de la suscripción: `TRIALING`, `ACTIVE` o `ENDED`. |
 | `startedAt` | `TIMESTAMPTZ(3)` | Inicio efectivo del período representado. |
 | `trialEndsAt` | `TIMESTAMPTZ(3)` nullable | Fin exacto del trial cuando este registro lo contiene. |
+| `currentPeriodEndsAt` | `TIMESTAMPTZ(3)` nullable | Límite superior exclusivo de la cobertura pagada vigente; nulo mientras no exista cobertura pagada. |
 | `endedAt` | `TIMESTAMPTZ(3)` nullable | Fin efectivo del período; nulo mientras la suscripción está abierta. |
 | `createdAt` | `TIMESTAMPTZ(3)` | Momento en que Inventory App registró la suscripción. |
 
@@ -357,27 +360,34 @@ El trial dura exactamente 30 × 24 horas desde `startedAt`. Su intervalo de vige
 - Un negocio conserva un historial de suscripciones y puede tener múltiples registros a lo largo del tiempo; no se aplica `UNIQUE(businessId)` general.
 - Un negocio puede tener como máximo una suscripción abierta. Una suscripción abierta es aquella con `endedAt = null` y estado `TRIALING` o `ACTIVE`.
 - `TRIALING` requiere `trialEndsAt` y `endedAt = null`.
-- `ACTIVE` requiere `endedAt = null`. `trialEndsAt` puede conservar valor cuando el mismo registro comenzó como trial.
-- `ENDED` requiere `endedAt` y no concede por sí mismo acceso comercial activo.
+- `TRIALING` no concede gracia al llegar a `trialEndsAt` y no produce cobros automáticos.
+- `ACTIVE` requiere `endedAt = null` y `currentPeriodEndsAt` presente. Representa una relación pagada abierta, no necesariamente acceso operativo vigente. `trialEndsAt` puede conservar valor cuando el mismo registro comenzó como trial.
+- `ENDED` requiere `endedAt` y no concede por sí mismo acceso comercial activo; conserva los límites temporales históricos que correspondan.
 - Las transiciones mínimas válidas son `TRIALING → ACTIVE`, `TRIALING → ENDED` y `ACTIVE → ENDED`.
 - Una suscripción `ENDED` no se reabre. Una reactivación comercial posterior crea una nueva suscripción `ACTIVE`.
 - Cada negocio puede consumir un solo trial histórico. `trialEndsAt` no se elimina al activar o terminar la suscripción que lo contuvo.
 - El vencimiento temporal de `trialEndsAt` deja de conceder acceso aunque el proceso que materializa el cambio a `ENDED` todavía no se haya ejecutado.
+- Cada período pagado dura exactamente 30 × 24 horas. No se calculan meses calendario ni días de aniversario.
+- `currentPeriodEndsAt` es un límite superior exclusivo. Mientras `now < currentPeriodEndsAt` existe cobertura pagada; desde ese límite y durante exactamente 72 horas existe `GRACE_PERIOD`; al finalizar ese intervalo existe `SUSPENDED` si no se confirmó una renovación.
+- `GRACE_PERIOD` y `SUSPENDED` son condiciones efectivas derivadas y no valores del enum físico `status`. El backend las evalúa con tiempo autoritativo en cada operación protegida, sin depender de jobs programados.
+- Antes del vencimiento, una renovación confirmada agrega 720 horas desde el `currentPeriodEndsAt` vigente. Durante la gracia agrega 720 horas desde el `currentPeriodEndsAt` vencido. Después de la suspensión comienza en el instante de confirmación y agrega 720 horas.
+- Los pagos pendientes, fallidos o rechazados no amplían `currentPeriodEndsAt`.
 - Una nueva dirección de correo no concede automáticamente un nuevo trial; el ciclo se gestiona alrededor del negocio.
 - Los cobros de la suscripción no reutilizarán la entidad `Payment` del dominio de ventas.
 - El vencimiento del trial o de la suscripción no elimina inmediatamente los datos del negocio.
-- Un cambio efectivo de plan cierra la suscripción abierta y crea una nueva suscripción con el nuevo `planId` dentro de la misma transacción, preservando el historial.
+- Un cambio efectivo de plan cierra la suscripción abierta y crea una nueva suscripción con el nuevo `planId` dentro de la misma transacción, preservando el historial. Las reglas comerciales futuras del cambio de plan permanecen pendientes.
 - `startedAt <= endedAt` cuando `endedAt` tenga valor y `startedAt < trialEndsAt` cuando `trialEndsAt` tenga valor.
 
 #### Protección física aprobada
 
 - Un índice único parcial sobre `businessId` cuando `trialEndsAt IS NOT NULL` garantiza como máximo una concesión histórica de trial por negocio.
 - Un índice único parcial sobre `businessId` cuando `endedAt IS NULL` garantiza como máximo una suscripción abierta por negocio.
-- Un `CHECK` exige: `TRIALING` con `trialEndsAt` presente y `endedAt` nulo; `ACTIVE` con `endedAt` nulo; y `ENDED` con `endedAt` presente.
+- Un `CHECK` exige: `TRIALING` con `trialEndsAt` presente, `currentPeriodEndsAt` nulo y `endedAt` nulo; `ACTIVE` con `currentPeriodEndsAt` presente y `endedAt` nulo; y `ENDED` con `endedAt` presente.
 - Cuando existe, `trialEndsAt - startedAt` equivale exactamente a 2 592 000 segundos. Cuando existe, `endedAt >= startedAt`.
 - No se incorpora `createdAt <= startedAt` como `CHECK` sin una decisión adicional.
 - Un trigger PostgreSQL impide modificar o eliminar `trialEndsAt` una vez concedido y también impide eliminar la suscripción que conserva esa evidencia. Las transiciones legítimas conservan el valor.
 - Las transiciones comerciales siguen validadas por el servicio. Los índices y restricciones constituyen defensa adicional frente a concurrencia.
+- La confirmación de un cobro, la creación de `SubscriptionPayment` y la ampliación de `currentPeriodEndsAt` deben confirmarse de forma transaccional e idempotente. La estrategia física dependerá del evento confiable del proveedor todavía no seleccionado.
 - No se crea `TrialGrant` ni un indicador redundante `trialConsumed` en `Business`.
 
 ### Cardinalidades
@@ -386,13 +396,72 @@ El trial dura exactamente 30 × 24 horas desde `startedAt`. Su intervalo de vige
 - Cada `Subscription` referencia un `Plan`.
 - `Plan 1:N Subscription`.
 - `Business 1:N Subscription` histórica, con como máximo una suscripción abierta a la vez.
+- `Subscription 1:N SubscriptionPayment` histórica.
 
 ### Decisiones pendientes
 
 - Detalle del flujo transaccional para cerrar una suscripción y abrir la siguiente dentro de la estrategia general de concurrencia aprobada.
-- Evento confiable que autoriza la transición a `ACTIVE` cuando se diseñe el dominio de billing.
+- Evento confiable que autoriza la transición a `ACTIVE` o una renovación.
 - Proveedor de facturación y referencias externas asociadas.
-- Política de acceso restringido, conservación, exportación y eventual eliminación tras el vencimiento.
+- Política de cancelación voluntaria, momento de cierre como `ENDED` y reactivación después de un cierre definitivo.
+- Política de conservación y eventual eliminación de datos a largo plazo.
+- Reglas futuras de precios y cambios de plan.
+
+## SubscriptionPayment
+
+### Propósito
+
+Conservar el historial de cobros confirmados que un `Business` realiza a Inventory App por su suscripción, junto con el período de cobertura adquirido. Es una entidad distinta de `Payment`, que pertenece exclusivamente a las ventas del negocio.
+
+### Atributos actualmente aprobados
+
+| Atributo lógico | Tipo conceptual | Descripción |
+| --- | --- | --- |
+| `id` | UUID | Identificador del cobro SaaS confirmado. |
+| `businessId` | UUID | Negocio que paga la suscripción. |
+| `subscriptionId` | UUID | Suscripción cuya cobertura se amplía. |
+| `amount` | `NUMERIC(19,2)` | Importe confirmado, conservado como snapshot histórico. |
+| `currencyCode` | Texto | Moneda aplicada al cobro; para `Esencial` V1 corresponde a PEN. |
+| `coverageStartsAt` | `TIMESTAMPTZ(3)` | Inicio inclusivo del período adquirido. |
+| `coverageEndsAt` | `TIMESTAMPTZ(3)` | Fin exclusivo del período adquirido. |
+| `confirmedAt` | `TIMESTAMPTZ(3)` | Instante de confirmación confiable del cobro. |
+| `createdAt` | `TIMESTAMPTZ(3)` | Instante en que Inventory App registró el cobro. |
+
+No se incorpora un estado de cobro en esta etapa: cada fila representa un cobro confirmado. Los intentos pendientes, fallidos, rechazados o revertidos requieren un diseño posterior. El tratamiento fiscal y los snapshots definitivos de IGV también permanecen pendientes.
+
+### Clave primaria
+
+- `id` (UUID).
+
+### Claves foráneas
+
+- `(businessId, subscriptionId)` → `Subscription(businessId, id)`.
+
+La FK compuesta impide asociar un cobro a una suscripción de otro negocio y requiere la clave candidata `Subscription(businessId, id)`.
+
+### Restricciones conceptuales
+
+- `amount > 0`.
+- `currencyCode` es obligatorio; su formato físico y validación quedan pendientes.
+- `coverageStartsAt < coverageEndsAt` y la diferencia equivale exactamente a 2 592 000 segundos.
+- La cobertura utiliza intervalos `[coverageStartsAt, coverageEndsAt)`.
+- Una renovación anticipada comienza en el `currentPeriodEndsAt` vigente; durante la gracia comienza en el límite vencido; después de la suspensión comienza en `confirmedAt`.
+- El cobro confirmado, su período cubierto y la actualización de `Subscription.currentPeriodEndsAt` deben ser coherentes y confirmarse en la misma operación transaccional e idempotente.
+- Un cobro no se elimina ni se modifica para reescribir el historial comercial.
+- No almacena datos sensibles de tarjetas.
+
+### Cardinalidades
+
+- Cada `SubscriptionPayment` pertenece a una `Subscription` y a su mismo `Business`.
+- `Subscription 1:N SubscriptionPayment`.
+
+### Decisiones pendientes
+
+- Proveedor de pagos, evento confiable de confirmación y referencias externas.
+- Modelo separado para intentos pendientes, fallidos, rechazados o revertidos.
+- Tratamiento fiscal y snapshots definitivos de IGV.
+- Estrategia de idempotencia de eventos del proveedor y restricciones adicionales contra cobros duplicados.
+- Política de cancelación, reversión comercial y eventual devolución de cobros SaaS.
 
 ## Location
 
@@ -1612,6 +1681,11 @@ Antes de construir el esquema físico deberán revisarse conjuntamente:
 - implementación física de invariantes que atraviesan múltiples filas o entidades;
 - mecanismo físico adicional para comprobar completitud y sincronización de combinaciones frente a escrituras directas, sin tratar `combinationKey` como garantía suficiente;
 - catálogo inicial de unidades y valores predeterminados de granularidad;
+- proveedor de pagos SaaS, evento confiable de confirmación, referencias externas e idempotencia de sus eventos;
+- modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos;
+- tratamiento fiscal y snapshots definitivos de IGV;
+- cancelación voluntaria, cierre como `ENDED`, reactivación posterior y conservación de datos a largo plazo;
+- administración interna de la plataforma y reglas futuras de precios o cambios de plan;
 
 Estas decisiones pendientes no modifican las relaciones y reglas conceptuales ya aprobadas en los cinco bloques.
 
@@ -1641,7 +1715,8 @@ User 1 ─── N BusinessMembership N ─── 1 Business
                     │                      │             └── 1 ─── N Attribute 1 ─── N AttributeValue
                     │                      │
                     │                      └── 1 ─── N Subscription N ─── 1 Plan
-                    │                              (máximo una abierta y un trial histórico)
+                    │                              │ (máximo una abierta y un trial histórico)
+                    │                              └── 1 ─── N SubscriptionPayment
                     │
                     ├── 1 ─── N InventoryMovement para operaciones humanas V1
                     ├── 1 ─── N Sale

@@ -11,35 +11,35 @@ Inventory App distingue dos dominios de pagos:
 
 El dominio de facturación SaaS no reutiliza `Payment` ni se mezcla con las ventas, reportes comerciales o medios de pago registrados por el negocio.
 
+Los cobros de Inventory App se representan conceptualmente mediante `SubscriptionPayment`, separados de los pagos que los negocios reciben de sus clientes.
+
 ## Plan
 
-`Plan` representa una oferta del SaaS. Tiene un código técnico estable, un nombre visible y un estado de actividad.
+`Plan` representa una oferta del SaaS. Tiene un código técnico estable, un nombre visible y un estado de actividad. La V1 ofrece únicamente el plan `Esencial`, con precio anunciado de S/ 99.90 por cada período fijo de 30 × 24 horas, con IGV incluido cuando corresponda.
 
 Un plan inactivo no se ofrece para nuevas suscripciones, pero continúa existiendo para preservar las suscripciones históricas que lo referencian.
 
-La arquitectura permitirá que un plan determine capacidades como la cantidad de ubicaciones habilitadas. Esto no modifica el modelo operativo: `Business 1:N Location` está soportado desde la V1.
+Una futura representación de capacidades configurables podrá evaluarse cuando existan planes y límites comerciales concretos. `PlanFeature` no forma parte del modelo implementable de la V1. Seguridad, integridad, aislamiento multi-tenant y respaldos son garantías obligatorias para todos los planes y no se modelan como beneficios opcionales.
 
 No están definidos todavía:
 
-- precios ni monedas;
-- periodicidad o duración contractual;
-- cantidad de ubicaciones de un plan concreto;
+- límites de usuarios, ubicaciones u otros recursos del plan `Esencial`;
 - cantidad máxima de empleados;
-- otros límites o capacidades comerciales.
+- otros límites o capacidades comerciales configurables.
 
 ## Subscription
 
 `Subscription` representa un período del ciclo de suscripción de un `Business`. La suscripción pertenece al negocio, no directamente a un `User`.
 
-Un negocio puede conservar múltiples suscripciones históricas, pero como máximo una puede estar abierta a la vez. Una suscripción abierta es un período que todavía no ha terminado y cuyo estado es `TRIALING` o `ACTIVE`.
+Un negocio puede conservar múltiples suscripciones históricas, pero como máximo una puede permanecer abierta a la vez. Una suscripción abierta tiene `endedAt = null` y estado físico `TRIALING` o `ACTIVE`. Los permisos de los empleados no crean suscripciones independientes: la suscripción se evalúa para el `Business`.
 
-Los estados aprobados para la V1 son:
+Los estados físicos aprobados para la V1 son:
 
-- `TRIALING`: el negocio se encuentra dentro de su trial vigente.
-- `ACTIVE`: el negocio tiene acceso comercial activo fuera del trial.
-- `ENDED`: el período de suscripción terminó y no concede por sí mismo acceso comercial activo.
+- `TRIALING`: la suscripción contiene la única concesión histórica de prueba del negocio.
+- `ACTIVE`: existe una relación pagada abierta; este estado no garantiza por sí solo que la cobertura esté vigente en el instante consultado.
+- `ENDED`: la suscripción fue cerrada y no concede por sí misma acceso comercial.
 
-Las transiciones mínimas aprobadas son:
+Las transiciones físicas mínimas aprobadas se mantienen:
 
 ```text
 TRIALING → ACTIVE
@@ -47,59 +47,81 @@ TRIALING → ENDED
 ACTIVE   → ENDED
 ```
 
-Una suscripción `ENDED` no se reabre. Una reactivación comercial posterior crea un nuevo período histórico `ACTIVE`.
+`GRACE_PERIOD` y `SUSPENDED` son condiciones efectivas de acceso derivadas, no estados persistidos. La autorización las calcula a partir del estado físico, los límites temporales y el tiempo autoritativo. Ninguna transición ni vencimiento autoriza cobros automáticos sin consentimiento.
 
 ## Trial
 
 Cada negocio puede consumir un único trial histórico. El trial dura exactamente 30 × 24 horas desde su inicio y su instante final no se amplía por cambios de correo, usuario propietario o membresías.
 
-`trialEndsAt` es la evidencia histórica de esa concesión. Se conserva al pasar la suscripción a `ACTIVE` o `ENDED`, no se reinicia por un cambio de plan y no puede modificarse o eliminarse mediante la operación normal. No se crea una entidad `TrialGrant` ni un indicador redundante `trialConsumed`.
+`trialEndsAt` es la evidencia histórica de esa concesión y debe conservarse aunque el negocio contrate posteriormente o pierda acceso. No se reinicia por un cambio de plan y no puede modificarse o eliminarse mediante la operación normal.
 
 Crear o utilizar una nueva dirección de correo no concede automáticamente otro trial. El derecho al trial se modela alrededor de `Business`, no de `User`.
 
-Cuando se alcanza el instante final del trial, el negocio deja de tener acceso por trial aunque un proceso programado todavía no haya materializado el cambio de estado a `ENDED`. La autorización comercial debe evaluar la vigencia temporal y no confiar únicamente en que un proceso diferido ya haya actualizado el registro.
+La prueba gratuita no genera un cobro automático ni dispone de período de gracia. Al alcanzar `trialEndsAt`, el acceso por trial termina inmediatamente aunque un proceso programado todavía no haya materializado el cambio físico a `ENDED`. Contratar `Esencial` requiere consentimiento del cliente y confirmación confiable del pago.
 
 El onboarding seguirá siendo sencillo. La V1 no aplicará por defecto bloqueos agresivos basados en nombre comercial, dirección IP, dispositivo u otros mecanismos similares. Cualquier control antifraude adicional requerirá una decisión posterior justificada.
 
-## Cambios de plan e historial
+## Cobertura pagada, renovación, gracia y suspensión
 
-Un cambio efectivo de plan preserva el historial:
+Una suscripción pagada utiliza `currentPeriodEndsAt` como límite superior exclusivo de su cobertura vigente. Cada período pagado dura exactamente 30 × 24 horas; no utiliza meses calendario ni conserva un día de aniversario mensual.
 
-1. termina el período abierto asociado al plan anterior;
-2. crea un nuevo período de suscripción asociado al nuevo plan;
-3. realiza ambos efectos de forma consistente en una misma operación transaccional.
+La condición efectiva se evalúa con el tiempo autoritativo del backend:
 
-No se modifica retroactivamente el plan de una suscripción histórica para representar un cambio posterior.
+- existe `PAID_ACCESS` mientras el instante actual sea anterior a `currentPeriodEndsAt`;
+- existe `GRACE_PERIOD` desde `currentPeriodEndsAt`, inclusive, hasta `currentPeriodEndsAt + 72 horas`, de forma exclusiva;
+- existe `SUSPENDED` al alcanzar ese último límite sin una renovación confirmada.
 
-El modelo relacional refuerza bajo concurrencia tanto el trial único como la única suscripción abierta mediante índices únicos parciales. La duración exacta, la coherencia entre estado y fechas, y la inmutabilidad de la evidencia del trial se protegen además con restricciones y triggers PostgreSQL. Las transiciones comerciales continúan siendo responsabilidad del servicio.
+Durante `GRACE_PERIOD`, el negocio conserva su operación normal y recibe avisos de renovación. El cálculo no depende de que un proceso programado actualice una fila.
+
+Las renovaciones amplían cobertura únicamente tras una confirmación confiable del pago:
+
+- antes del vencimiento, el nuevo período comienza en el `currentPeriodEndsAt` vigente;
+- durante la gracia, comienza en el `currentPeriodEndsAt` vencido, por lo que la gracia no añade cobertura gratuita;
+- después de la suspensión, comienza en el instante de confirmación.
+
+Cada renovación agrega exactamente 720 horas. Un pago pendiente, fallido o rechazado no amplía `currentPeriodEndsAt`. La confirmación del cobro, su período cubierto y la actualización de la cobertura deben conservar coherencia transaccional e idempotente.
+
+Durante `SUSPENDED`, una membresía `OWNER ACTIVE` puede iniciar sesión, consultar productos, inventario y ventas en modo lectura, exportar datos de su propio negocio, consultar la suscripción, renovarla y cerrar sesión. No puede registrar ventas, anulaciones, devoluciones, reembolsos, movimientos o ajustes de inventario; tampoco modificar productos, variantes, ubicaciones, membresías ni otros datos comerciales o administrativos.
+
+Una membresía `EMPLOYEE ACTIVE` solo puede autenticarse, ver el aviso de suspensión y cerrar sesión. No puede consultar ni exportar datos comerciales, renovar ni ejecutar operaciones del negocio.
+
+La suspensión no elimina datos, historial ni membresías. Todas las consultas y exportaciones permitidas continúan sujetas al aislamiento del `Business` y a la autorización backend.
+
+Una suscripción `ENDED` no se reabre; la reactivación después de un cierre definitivo continúa pendiente y, conforme al modelo vigente, requeriría una nueva suscripción. El historial de contrataciones, cobros y períodos cubiertos debe preservarse.
 
 ## Facturación SaaS
 
-La facturación de suscripciones utilizará posteriormente un proveedor o pasarela externa todavía no seleccionada.
+`SubscriptionPayment` representa un cobro confirmado del negocio por su suscripción a Inventory App. Una suscripción puede tener múltiples cobros históricos. Cada registro conserva el importe y las condiciones monetarias aplicadas, así como el intervalo de cobertura adquirido. Esta entidad no representa pagos de ventas ni reembolsos que el negocio realiza a sus propios clientes.
+
+La facturación utilizará posteriormente un proveedor o pasarela externa todavía no seleccionada.
 
 Inventory App no almacenará directamente datos sensibles de tarjetas. El backend no confiará únicamente en información enviada por el frontend para activar una suscripción; la confirmación deberá proceder de un mecanismo confiable del proveedor elegido.
 
-Todavía no se define qué evento concreto autoriza la transición a `ACTIVE`.
+Todavía no se define qué evento concreto y verificable confirma un cobro, una renovación o la transición a `ACTIVE`. Tampoco se definen estados ni persistencia para intentos pendientes, fallidos, rechazados o revertidos.
 
 ## Finalización y conservación de datos
 
-El vencimiento del trial sin una suscripción activa o la finalización posterior de una suscripción afecta el derecho de uso, pero no provoca por sí mismo la eliminación inmediata de `Business`, productos, inventario, ventas ni otros datos.
+La suspensión afecta el derecho a ejecutar operaciones comerciales, pero no provoca por sí misma la eliminación de `Business`, productos, inventario, ventas, membresías ni otros datos.
 
 Continúan pendientes:
 
-- la política de acceso restringido después de `ENDED`;
 - el período de conservación;
-- las condiciones de exportación;
 - la eventual eliminación de datos.
 
-No debe inferirse acceso posterior, período de gracia ni otra política comercial hasta que sea aprobada.
+La política de lectura y exportación durante la suspensión es la definida anteriormente. No debe inferirse una conservación indefinida ni una política de eliminación todavía no aprobada.
 
 ## Decisiones pendientes
 
 - Proveedor de facturación y contratos de integración.
-- Evento confiable que permite activar una suscripción.
-- Precios, monedas, periodicidad y duración contractual.
-- Límites y capacidades concretas de cada plan.
-- Política de acceso, conservación, exportación y eliminación después de `ENDED`.
+- Evento confiable que confirma un cobro o permite activar una suscripción.
+- Modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos.
+- Tratamiento fiscal y snapshots definitivos de IGV.
+- Política de cancelación voluntaria y momento en que una suscripción pasa a `ENDED`.
+- Reactivación después de un cierre definitivo.
+- Política de conservación de datos a largo plazo.
+- Límites de usuarios y demás capacidades concretas de `Esencial`.
+- Reglas de precios futuros y cambios de plan.
+- Identidad, autorización y alcance de la administración interna de la plataforma.
+- Atributos de integración externa de `SubscriptionPayment` una vez seleccionado el proveedor.
 
-Los detalles relacionales y los mecanismos físicos para proteger el historial, el único trial y la única suscripción abierta se documentan en `docs/relational-data-model.md`.
+Los detalles relacionales se documentan en `docs/relational-data-model.md`. Estas reglas no autorizan a inventar estados de cobro, atributos fiscales ni mecanismos del proveedor todavía no aprobados.
