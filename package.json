@@ -8,16 +8,22 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc --build --pretty false",
+    "dev:web": "npm run dev --workspace @inventory-app/web",
+    "dev:admin": "npm run dev --workspace @inventory-app/admin",
+    "dev:api": "npm run dev --workspace @inventory-app/api",
+    "dev:worker": "npm run dev --workspace @inventory-app/worker",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
+    "test": "npm run test --workspaces --if-present",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.12.0",
+    "globals": "^17.13.0",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
