@@ -75,15 +75,24 @@ inventory-app/
 - `packages/shared`: código compartido cuando exista una necesidad concreta.
 - `docs`: decisiones funcionales, arquitectónicas y de datos.
 
-Esta es la estructura aprobada para la implementación futura; todavía no se encuentra creada en el repositorio.
+La estructura base `apps/` y `packages/` ya está preparada. Las aplicaciones y paquetes todavía no se han generado.
 
 ## Estado actual
 
-El proyecto se encuentra en fase de diseño y consolidación documental.
+El proyecto ha iniciado la preparación técnica del monorepo después de consolidar su diseño documental.
 
 Actualmente están documentados la arquitectura, los modelos conceptual y relacional, y las reglas principales de seguridad, suscripciones, roles, variantes, inventario, ventas, pagos SaaS y operación de plataforma. Todavía no existen frontends funcionales, una API o worker operativos, un esquema Prisma, migraciones de base de datos, integración de pagos ni un despliegue.
 
-Por ese motivo, aún no hay instrucciones de instalación o ejecución de aplicaciones.
+## Desarrollo
+
+Desde la raíz del repositorio:
+
+```bash
+npm install
+npm run check
+```
+
+`npm run check` ejecuta la comprobación de TypeScript, ESLint, Prettier y las pruebas disponibles. En esta etapa no existen aplicaciones ni pruebas funcionales; Vitest finaliza correctamente cuando todavía no encuentra archivos de prueba.
 
 ## Documentación
 
