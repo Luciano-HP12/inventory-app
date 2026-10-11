@@ -1,6 +1,6 @@
 # Modelo relacional de datos
 
-Este documento consolida el diseño relacional aprobado de Inventory App en cinco bloques: identidad, negocios, suscripciones y ubicaciones; catálogo de productos; inventario; ventas; y auditoría y entidades de soporte. El documento conserva separadas las invariantes funcionales aprobadas de los mecanismos físicos que todavía deben concretarse en PostgreSQL y Prisma.
+Este documento consolida el diseño relacional aprobado de Inventory App en seis bloques: identidad, negocios, suscripciones y ubicaciones; catálogo de productos; inventario; ventas; auditoría y entidades de soporte; y operación de plataforma, pagos SaaS y evidencia legal. El documento conserva separadas las invariantes funcionales aprobadas de los mecanismos físicos que todavía deben concretarse en PostgreSQL y Prisma.
 
 Las claves primarias principales utilizarán UUID. Los nombres de atributos son nombres lógicos del modelo. Los tipos PostgreSQL que se indican expresamente forman parte de las convenciones aprobadas; cuando una estrategia física se marque como pendiente o propuesta, no constituye todavía una columna, índice, constraint o implementación Prisma definitiva.
 
@@ -30,9 +30,9 @@ Las claves primarias principales utilizarán UUID. Los nombres de atributos son 
 
 La estrategia relacional aprobada distingue:
 
-- Entidades tenant-scoped con `businessId` directo: `BusinessMembership`, `Subscription`, `SubscriptionPayment`, `Location`, `Category`, `Product`, `ProductVariant`, `InventoryBalance`, `InventoryMovement`, `Sale`, `SaleItem`, `SaleCancellation`, `SaleReturn`, `Refund`, `Supplier`, `AuditLog` e `IdempotencyRecord`.
+- Entidades tenant-scoped con `businessId` directo: `BusinessMembership`, `Subscription`, `SubscriptionPaymentAttempt`, `SubscriptionPayment`, `SubscriptionPaymentAdjustment`, `PlatformSupportAccessGrant`, `Location`, `Category`, `Product`, `ProductVariant`, `InventoryBalance`, `InventoryMovement`, `Sale`, `SaleItem`, `SaleCancellation`, `SaleReturn`, `Refund`, `Supplier`, `AuditLog` e `IdempotencyRecord`.
 - Entidades cuyo tenant se deriva de una relación obligatoria: `Attribute` mediante `Product`; `AttributeValue` mediante `Attribute`; `ProductVariantAttributeValue` mediante la variante y el valor; `Payment` mediante `Sale`; y `SaleReturnItem` mediante `SaleReturn` y `SaleItem`.
-- Entidades globales o no pertenecientes a un tenant: `User`, `Plan` y `UnitOfMeasure`. `Business` es la raíz del tenant.
+- Entidades globales o no pertenecientes a un tenant: `User`, `Plan`, `UnitOfMeasure`, `PlatformAdminMembership`, `LegalDocument`, `PlatformAuditLog` y `OperationalIncident`. `PaymentProviderEvent` puede permanecer sin `businessId` mientras su correlación no sea verificable; `LegalDocumentAcceptance` puede representar un contexto personal o empresarial. `Business` es la raíz del tenant.
 
 Las relaciones entre entidades tenant-scoped deben impedir referencias cruzadas entre negocios. Las claves foráneas compuestas que incluyan `businessId` forman parte de la estrategia aprobada cuando la relación conecta dos entidades con tenant directo. Se conservan las PK UUID simples y se agregan claves candidatas compuestas únicamente cuando una FK tenant-scoped u otra invariante aprobada las necesita.
 
@@ -44,8 +44,10 @@ Las siguientes claves candidatas existen para ser destino de las FKs compuestas 
 
 | Entidad destino | Clave candidata aprobada | Relaciones que la requieren |
 | --- | --- | --- |
-| `BusinessMembership` | `(businessId, id)` | Movimientos, ventas, anulaciones, devoluciones, reembolsos y auditorías realizados por una membresía del mismo negocio. |
-| `Subscription` | `(businessId, id)` | Cobros de suscripción pertenecientes al mismo negocio. |
+| `BusinessMembership` | `(businessId, id)` | Movimientos, ventas, anulaciones, devoluciones, reembolsos, checkouts y auditorías realizados por una membresía del mismo negocio. |
+| `Subscription` | `(businessId, id)` | Intentos, cobros y ajustes de suscripción pertenecientes al mismo negocio. |
+| `SubscriptionPaymentAttempt` | `(businessId, subscriptionId, id)` | Cobros confirmados vinculados a un intento válido del mismo negocio y suscripción. |
+| `SubscriptionPayment` | `(businessId, subscriptionId, id)` | Ajustes financieros del mismo negocio y suscripción. |
 | `Location` | `(businessId, id)` | Saldos, movimientos y ventas del mismo negocio. |
 | `Category` | `(businessId, id)` | Categoría opcional de un producto del mismo negocio. |
 | `Product` | `(businessId, id)` | Variantes del mismo negocio. |
@@ -69,7 +71,11 @@ Las FKs tenant-scoped y de coherencia derivada aprobadas son:
 | Entidad origen | Columnas de origen | Entidad y columnas de destino |
 | --- | --- | --- |
 | `Product` | `(businessId, categoryId)` | `Category(businessId, id)` |
-| `SubscriptionPayment` | `(businessId, subscriptionId)` | `Subscription(businessId, id)` |
+| `SubscriptionPaymentAttempt` | `(businessId, subscriptionId)` | `Subscription(businessId, id)` |
+| `SubscriptionPaymentAttempt` | `(businessId, initiatedByMembershipId)` | `BusinessMembership(businessId, id)` |
+| `SubscriptionPayment` | `(businessId, subscriptionId, paymentAttemptId)` | `SubscriptionPaymentAttempt(businessId, subscriptionId, id)` |
+| `SubscriptionPaymentAdjustment` | `(businessId, subscriptionId)` | `Subscription(businessId, id)` |
+| `SubscriptionPaymentAdjustment` | `(businessId, subscriptionId, subscriptionPaymentId)` | `SubscriptionPayment(businessId, subscriptionId, id)`, cuando corresponda |
 | `ProductVariant` | `(businessId, productId)` | `Product(businessId, id)` |
 | `InventoryBalance` | `(businessId, productVariantId)` | `ProductVariant(businessId, id)` |
 | `InventoryBalance` | `(businessId, locationId)` | `Location(businessId, id)` |
@@ -117,7 +123,8 @@ Las FKs compuestas opcionales utilizan la semántica `MATCH SIMPLE` de PostgreSQ
 | --- | --- | --- | --- |
 | Entidades tenant-scoped → `Business` | `RESTRICT` | `RESTRICT` | El tenant y su pertenencia son inmutables; no se permite borrar transitivamente sus datos. |
 | `BusinessMembership` → `User` | `RESTRICT` | `RESTRICT` | La membresía y sus operaciones históricas deben conservar al usuario referenciado. |
-| `Subscription` → `Plan` y `SubscriptionPayment` → `Subscription` | `RESTRICT` | `RESTRICT` | El plan, la suscripción, los cobros y sus períodos cubiertos forman parte del historial comercial. |
+| Relaciones de suscripción, intentos, cobros y ajustes | `RESTRICT` | `RESTRICT` | El plan, la suscripción, los procesos de cobro, los hechos financieros y sus períodos forman historial. |
+| Administración, soporte, eventos y evidencia legal | `RESTRICT` | `RESTRICT` | Los actores, concesiones, eventos y aceptaciones deben conservar referencias auditables. |
 | Catálogo y asociaciones de variantes | `RESTRICT` | `RESTRICT` | Productos, variantes, atributos, valores y combinaciones con historial no se destruyen en cascada. |
 | Inventario → variante, ubicación y membresía | `RESTRICT` | `RESTRICT` | Saldos y ledger deben conservar referencias estables. |
 | Ventas, pagos y reversiones | `RESTRICT` | `RESTRICT` | Los registros originales y compensatorios forman historial inmutable. |
@@ -128,7 +135,7 @@ Las FKs compuestas opcionales utilizan la semántica `MATCH SIMPLE` de PostgreSQ
 
 Las FKs compuestas garantizan pertenencia y coincidencia estructural; los `CHECK` garantizan condiciones que dependen exclusivamente de una fila. Las reglas que dependen de otras filas o de sumas acumuladas requieren validación dentro de transacciones con control de concurrencia y, si posteriormente se aprueba, refuerzo mediante triggers o constraints adicionales.
 
-Permanecen como invariantes transaccionales, entre otras: conservar al menos un `OWNER` activo; mantener como máximo una suscripción abierta y un trial histórico bajo concurrencia; conservar al menos una variante por producto; completar y hacer únicas las combinaciones de variantes; exigir hijos mínimos en ventas, anulaciones y devoluciones; limitar cantidades devueltas e importes reembolsados acumulados; y evitar operaciones incompatibles concurrentes.
+Permanecen como invariantes transaccionales, entre otras: conservar al menos un `OWNER` activo; mantener como máximo una suscripción abierta y un trial histórico bajo concurrencia; mantener un único proceso de pago no resuelto por negocio; aplicar una identidad financiera externa una sola vez; serializar ampliaciones de cobertura; conservar al menos una variante por producto; completar y hacer únicas las combinaciones de variantes; exigir hijos mínimos en ventas, anulaciones y devoluciones; limitar cantidades devueltas e importes reembolsados acumulados; y evitar operaciones incompatibles concurrentes.
 
 Prisma puede representar las PK simples, claves candidatas `@@unique` y FKs compuestas aprobadas. La representación de `CHECK`, índices únicos parciales y cualquier refuerzo multirow mediante SQL no se considera resuelta: deberá administrarse mediante migraciones revisadas y probarse frente a futuras migraciones Prisma. Las relaciones opcionales compuestas de `Refund` también deberán validarse con la versión concreta de Prisma antes de generar el esquema.
 
@@ -294,7 +301,7 @@ Representar una oferta comercial del SaaS. La V1 utiliza únicamente el plan `Es
 | `isActive` | Booleano | Indica si el plan puede utilizarse para nuevas suscripciones. |
 | `createdAt` | `TIMESTAMPTZ(3)` | Momento en que se creó el plan. |
 
-El precio anunciado de `Esencial` es S/ 99.90 por cada período fijo de 30 × 24 horas, con IGV incluido cuando corresponda. Este dato comercial no permite reconstruir cobros históricos: cada cobro confirmado conserva su propio importe y condiciones monetarias. No se agregan por ahora columnas de *entitlements* ni una entidad `PlanFeature` implementable.
+El precio previsto de `Esencial` es S/ 99.90 por cada período fijo de 30 × 24 horas, con impuestos incluidos cuando corresponda. Este dato comercial no permite reconstruir cobros históricos: cada cobro confirmado conserva su propio importe y condiciones monetarias. No se agregan por ahora columnas de *entitlements* ni una entidad `PlanFeature` implementable.
 
 ### Clave primaria
 
@@ -387,7 +394,7 @@ El trial dura exactamente 30 × 24 horas desde `startedAt`. Su intervalo de vige
 - No se incorpora `createdAt <= startedAt` como `CHECK` sin una decisión adicional.
 - Un trigger PostgreSQL impide modificar o eliminar `trialEndsAt` una vez concedido y también impide eliminar la suscripción que conserva esa evidencia. Las transiciones legítimas conservan el valor.
 - Las transiciones comerciales siguen validadas por el servicio. Los índices y restricciones constituyen defensa adicional frente a concurrencia.
-- La confirmación de un cobro, la creación de `SubscriptionPayment` y la ampliación de `currentPeriodEndsAt` deben confirmarse de forma transaccional e idempotente. La estrategia física dependerá del evento confiable del proveedor todavía no seleccionado.
+- La confirmación verificada, la creación de `SubscriptionPayment`, el procesamiento del evento y la ampliación de `currentPeriodEndsAt` deben confirmarse localmente de forma transaccional e idempotente. La llamada externa no mantiene abierta esa transacción y el contrato concreto depende del proveedor finalmente seleccionado.
 - No se crea `TrialGrant` ni un indicador redundante `trialConsumed` en `Business`.
 
 ### Cardinalidades
@@ -407,61 +414,135 @@ El trial dura exactamente 30 × 24 horas desde `startedAt`. Su intervalo de vige
 - Política de conservación y eventual eliminación de datos a largo plazo.
 - Reglas futuras de precios y cambios de plan.
 
+## SubscriptionPaymentAttempt
+
+### Propósito
+
+Representar un proceso de checkout sin afirmar por sí mismo que existe un cobro confirmado. Separa el estado técnico del checkout del resultado financiero conocido.
+
+### Atributos conceptuales aprobados
+
+| Atributo lógico | Tipo conceptual | Descripción |
+| --- | --- | --- |
+| `id` | UUID | Identificador del intento. |
+| `businessId` | UUID | Negocio que inicia el proceso. |
+| `subscriptionId` | UUID | Suscripción que se pretende activar o renovar. |
+| `initiatedByMembershipId` | UUID | Membresía `OWNER` que inicia el checkout. |
+| `provider` | Texto controlado | Adaptador utilizado. Culqi solo es candidata sandbox. |
+| `providerAccountReference` | Texto | Identidad no secreta de la cuenta del proveedor. |
+| `providerCheckoutReference` | Texto nullable | Referencia del checkout u orden cuando el proveedor la emite. |
+| `checkoutStatus` | Estado controlado | Ciclo técnico del checkout. Catálogo físico pendiente. |
+| `financialStatus` | Estado controlado | Resultado financiero conocido, independiente del checkout. Catálogo físico pendiente. |
+| `expectedAmount` | `NUMERIC(19,2)` | Importe esperado preservado como snapshot. |
+| `currencyCode` | Texto | Moneda esperada; PEN para `Esencial` V1. |
+| `createdAt` | `TIMESTAMPTZ(3)` | Registro del intento. |
+| `expiresAt` | `TIMESTAMPTZ(3)` | Límite visible inicial del checkout. |
+| `resolvedAt` | `TIMESTAMPTZ(3)` nullable | Momento en que deja de ser un proceso no resuelto. |
+
+### Clave primaria y FKs
+
+- PK `id` UUID.
+- `(businessId, subscriptionId)` → `Subscription(businessId, id)`.
+- `(businessId, initiatedByMembershipId)` → `BusinessMembership(businessId, id)`.
+
+### Restricciones e invariantes
+
+- `expectedAmount > 0`; en V1 el snapshot previsto es S/ 99.90.
+- La vigencia inicial es de 15 minutos, condicionada a la capacidad real del proveedor.
+- Solo existe un proceso no resuelto por `Business`.
+- Un timeout o expiración visible no demuestra rechazo financiero ni autoriza otro intento si todavía puede producirse un cargo.
+- Un índice parcial puede impedir dos filas materializadas como no resueltas, pero el tiempo actual no debe incorporarse como predicado volátil. El servicio bloquea la raíz del negocio, materializa expiraciones verificadas y crea el nuevo intento en una transacción.
+- La membresía debe estar `ACTIVE`, tener rol `OWNER` y pertenecer al negocio al iniciar el proceso.
+- No almacena credenciales ni datos completos de tarjetas.
+
+### Cardinalidades y pendientes
+
+- `Subscription 1:N SubscriptionPaymentAttempt`.
+- `BusinessMembership 1:N SubscriptionPaymentAttempt` como iniciador.
+- Un intento puede relacionarse con uno o más hechos financieros si el proveedor produce cargos reales distintos; esa anomalía se escala como incidente.
+- Permanecen pendientes los catálogos de estados, la semántica exacta de resolución y las capacidades verificadas del proveedor.
+
 ## SubscriptionPayment
 
 ### Propósito
 
-Conservar el historial de cobros confirmados que un `Business` realiza a Inventory App por su suscripción, junto con el período de cobertura adquirido. Es una entidad distinta de `Payment`, que pertenece exclusivamente a las ventas del negocio.
+Conservar un cobro SaaS real, distinto, confirmado y aplicado, junto con sus condiciones y período de cobertura. Es distinto de `Payment`, que pertenece a ventas.
 
-### Atributos actualmente aprobados
+### Atributos conceptuales aprobados
 
 | Atributo lógico | Tipo conceptual | Descripción |
 | --- | --- | --- |
-| `id` | UUID | Identificador del cobro SaaS confirmado. |
-| `businessId` | UUID | Negocio que paga la suscripción. |
-| `subscriptionId` | UUID | Suscripción cuya cobertura se amplía. |
-| `amount` | `NUMERIC(19,2)` | Importe confirmado, conservado como snapshot histórico. |
-| `currencyCode` | Texto | Moneda aplicada al cobro; para `Esencial` V1 corresponde a PEN. |
-| `coverageStartsAt` | `TIMESTAMPTZ(3)` | Inicio inclusivo del período adquirido. |
-| `coverageEndsAt` | `TIMESTAMPTZ(3)` | Fin exclusivo del período adquirido. |
-| `confirmedAt` | `TIMESTAMPTZ(3)` | Instante de confirmación confiable del cobro. |
-| `createdAt` | `TIMESTAMPTZ(3)` | Instante en que Inventory App registró el cobro. |
+| `id` | UUID | Identificador interno del cobro. |
+| `businessId` | UUID | Negocio que realizó el pago. |
+| `subscriptionId` | UUID | Suscripción cuya cobertura se amplió. |
+| `paymentAttemptId` | UUID | Intento válido obligatorio. |
+| `provider` | Texto controlado | Proveedor que confirmó el cobro. |
+| `providerAccountReference` | Texto | Cuenta del proveedor que recibió el cobro. |
+| `externalPaymentReference` | Texto | Identidad financiera del cobro en el proveedor. |
+| `amount` | `NUMERIC(19,2)` | Importe confirmado y preservado. |
+| `currencyCode` | Texto | Moneda confirmada; PEN para `Esencial` V1. |
+| `coverageStartsAt` | `TIMESTAMPTZ(3)` | Inicio inclusivo de la cobertura aplicada. |
+| `coverageEndsAt` | `TIMESTAMPTZ(3)` | Fin exclusivo de la cobertura aplicada. |
+| `confirmedAt` | `TIMESTAMPTZ(3)` | Instante confiable de confirmación del proveedor. |
+| `createdAt` | `TIMESTAMPTZ(3)` | Instante de registro en Inventory App. |
 
-No se incorpora un estado de cobro en esta etapa: cada fila representa un cobro confirmado. Los intentos pendientes, fallidos, rechazados o revertidos requieren un diseño posterior. El tratamiento fiscal y los snapshots definitivos de IGV también permanecen pendientes.
+### Clave primaria, claves candidatas y FKs
 
-### Clave primaria
+- PK `id` UUID.
+- `UNIQUE(provider, providerAccountReference, externalPaymentReference)` impide aplicar dos veces el mismo cobro real.
+- `(businessId, subscriptionId, paymentAttemptId)` → `SubscriptionPaymentAttempt(businessId, subscriptionId, id)`.
 
-- `id` (UUID).
+### Restricciones e invariantes
 
-### Claves foráneas
+- `amount > 0` y debe coincidir con el intento confirmado.
+- `coverageEndsAt - coverageStartsAt` equivale exactamente a 2 592 000 segundos.
+- Cada cobro distinto confirmado agrega 720 horas y no se elimina ni modifica para reescribir historia.
+- La referencia externa, importe, moneda, cuenta, intento, negocio y suscripción se verifican antes de aplicar cobertura.
+- La creación del pago y la actualización de `currentPeriodEndsAt` ocurren en una transacción local idempotente después de verificar externamente; ninguna llamada al proveedor mantiene abierta esa transacción.
+- Las confirmaciones tardías utilizan `confirmedAt`. El algoritmo determinista para múltiples confirmaciones fuera de orden permanece pendiente.
 
-- `(businessId, subscriptionId)` → `Subscription(businessId, id)`.
+### Cardinalidades y pendientes
 
-La FK compuesta impide asociar un cobro a una suscripción de otro negocio y requiere la clave candidata `Subscription(businessId, id)`.
+- `SubscriptionPaymentAttempt 1:N SubscriptionPayment` para conservar cargos reales distintos, incluidos incidentes de duplicación.
+- `Subscription 1:N SubscriptionPayment` histórica.
+- Permanecen pendientes tratamiento fiscal, reglas de cobros revertidos, confirmaciones fuera de orden y devolución excepcional.
 
-### Restricciones conceptuales
+## PaymentProviderEvent
 
-- `amount > 0`.
-- `currencyCode` es obligatorio; su formato físico y validación quedan pendientes.
-- `coverageStartsAt < coverageEndsAt` y la diferencia equivale exactamente a 2 592 000 segundos.
-- La cobertura utiliza intervalos `[coverageStartsAt, coverageEndsAt)`.
-- Una renovación anticipada comienza en el `currentPeriodEndsAt` vigente; durante la gracia comienza en el límite vencido; después de la suspensión comienza en `confirmedAt`.
-- El cobro confirmado, su período cubierto y la actualización de `Subscription.currentPeriodEndsAt` deben ser coherentes y confirmarse en la misma operación transaccional e idempotente.
-- Un cobro no se elimina ni se modifica para reescribir el historial comercial.
-- No almacena datos sensibles de tarjetas.
+### Propósito
 
-### Cardinalidades
+Persistir una notificación externa para deduplicación, conciliación, procesamiento y auditoría antes de producir efectos comerciales.
 
-- Cada `SubscriptionPayment` pertenece a una `Subscription` y a su mismo `Business`.
-- `Subscription 1:N SubscriptionPayment`.
+### Atributos conceptuales aprobados
 
-### Decisiones pendientes
+- `id` UUID, `provider`, `providerAccountReference`, `externalEventReference`, `eventType`, `occurredAt`, `receivedAt`, `processingStatus`, `businessId` nullable, `paymentAttemptId` nullable, `subscriptionPaymentId` nullable y evidencia autenticada minimizada.
 
-- Proveedor de pagos, evento confiable de confirmación y referencias externas.
-- Modelo separado para intentos pendientes, fallidos, rechazados o revertidos.
-- Tratamiento fiscal y snapshots definitivos de IGV.
-- Estrategia de idempotencia de eventos del proveedor y restricciones adicionales contra cobros duplicados.
-- Política de cancelación, reversión comercial y eventual devolución de cobros SaaS.
+### Restricciones e invariantes
+
+- PK `id` UUID y unicidad de `(provider, providerAccountReference, externalEventReference)` cuando el proveedor ofrece una referencia estable.
+- Un evento se autentica antes de producir efectos y se procesa idempotentemente.
+- Puede permanecer sin tenant mientras no exista correlación verificable; no concede cobertura ni se asigna por conjetura.
+- Las referencias opcionales deben ser coherentes con el mismo negocio, intento y pago una vez correlacionadas.
+- La estrategia alternativa de deduplicación cuando no exista ID de evento, el formato de evidencia y su retención permanecen pendientes.
+
+## SubscriptionPaymentAdjustment
+
+### Propósito
+
+Registrar un ajuste financiero excepcional sin modificar el cobro original. No representa un reembolso ordinario por desistimiento.
+
+### Atributos conceptuales aprobados
+
+- `id` UUID, `businessId`, `subscriptionId`, `subscriptionPaymentId` nullable, `performedByPlatformAdminMembershipId`, tipo y efecto controlados, importe cuando corresponda, `reason`, `occurredAt` y `createdAt`.
+
+### Restricciones e invariantes
+
+- PK `id` UUID.
+- FKs tenant-scoped hacia suscripción y, cuando existe, pago; FK al actor administrativo global.
+- Solo una `PlatformAdminMembership` activa y autorizada puede crearlo.
+- `reason` es obligatorio y el registro es histórico, independiente y auditable.
+- No sobrescribe ni elimina `SubscriptionPayment`.
+- El catálogo de ajustes, signo del importe y posible efecto sobre cobertura requieren aprobación adicional.
 
 ## Location
 
@@ -1639,9 +1720,53 @@ El advisory lock pertenece a la misma transacción y se libera automáticamente 
 
 El advisory lock no sustituye `UNIQUE(businessId, scope, key)`, que permanece como árbitro final. Un *timeout* posterior al commit permite recuperar el resultado con la misma clave. No se realizan llamadas externas irreversibles dentro de la transacción comercial.
 
-La V1 persiste exclusivamente registros completados. Una versión futura podrá incorporar procesamiento asíncrono, nuevos estados y mecanismos de recuperación mediante migraciones controladas que preserven los registros históricos; esas capacidades no se diseñan en esta etapa.
+`IdempotencyRecord` persiste exclusivamente resultados completados y no adquiere un estado `PROCESSING`. El procesamiento asíncrono aprobado para conciliación utiliza una persistencia de trabajos separada, con reservas recuperables, y no cambia esta semántica.
 
 La canonicalización exacta de `requestHash` debe definirse antes de implementar los servicios.
+
+## Bloque 6: operación de plataforma y evidencia legal
+
+### PlatformAdminMembership
+
+Relaciona un `User` global con la administración interna, sin reutilizar `BusinessMembership`.
+
+Atributos conceptuales: `id` UUID, `userId` UUID, `role` con valor inicial `PLATFORM_ADMIN`, `status` `ACTIVE` o `REVOKED`, `createdAt` y `revokedAt` nullable. PK UUID, FK a `User.id` con `RESTRICT` y unicidad conceptual de una membresía administrativa por usuario en V1.
+
+Solo una membresía `ACTIVE`, autenticada con controles reforzados y MFA, autoriza operaciones administrativas. Su revocación conserva ajustes, accesos y auditorías históricas. La matriz detallada de operaciones sensibles y reautenticación permanece pendiente.
+
+### PlatformSupportAccessGrant
+
+Representa acceso excepcional de soporte, nunca acceso comercial ilimitado.
+
+Atributos conceptuales: `id` UUID, `businessId`, `platformAdminMembershipId`, alcance autorizado, `reason`, `startsAt`, `expiresAt`, `revokedAt` nullable y `createdAt`. PK UUID y FKs `RESTRICT` hacia `Business` y `PlatformAdminMembership`.
+
+El acceso es exclusivamente de lectura, se limita al negocio y recursos declarados, exige motivo y dura como máximo 60 minutos. La autorización comprueba vigencia y revocación en cada consulta y toda utilización se audita. El formato físico del alcance y el flujo de aprobación o autorregistro permanecen pendientes.
+
+### LegalDocument
+
+Representa una versión inmutable de términos, aviso de privacidad u otro documento aprobado. Atributos conceptuales: `id` UUID, tipo controlado, `version`, hash criptográfico del contenido, `publishedAt`, `effectiveAt` y `createdAt`. La combinación de tipo y versión es única. El contenido definitivo y el algoritmo/formato exacto del hash requieren validación externa.
+
+### LegalDocumentAcceptance
+
+Conserva evidencia inmutable de una aceptación o constancia respecto de una versión concreta. Atributos conceptuales: `id` UUID, `legalDocumentId`, `userId`, `businessId` nullable, `businessMembershipId` nullable, `paymentAttemptId` nullable, tipo de acto controlado, `acceptedAt` y `createdAt`.
+
+Las FKs compuestas deben impedir que negocio, membresía e intento pertenezcan a tenants distintos. Los `CHECK` de forma distinguen contexto personal y representación empresarial. Antes de contratar se exigen términos y constancia del aviso aplicables; los consentimientos opcionales se almacenan como actos separados. Evidencias adicionales, retención y reglas de reaceptación quedan sujetas a validación legal.
+
+### PlatformAuditLog
+
+Registra acciones administrativas sin crear una `BusinessMembership` ficticia. Atributos conceptuales: `id` UUID, `platformAdminMembershipId`, `businessId` nullable, `action`, `entityType`, `entityId` nullable y `createdAt`. Es append-only para el rol ordinario y utiliza `ON DELETE/UPDATE RESTRICT`.
+
+Debe cubrir como mínimo permisos administrativos, accesos de soporte, ajustes financieros, conciliaciones manuales, modo de recuperación y reactivación financiera. El catálogo definitivo y la retención permanecen pendientes.
+
+### OperationalIncident
+
+Conserva incidencias técnicas o financieras. Atributos conceptuales: `id` UUID, prioridad `HIGH`, `MEDIUM` o `INFO`, estado `OPEN`, `ACKNOWLEDGED` o `RESOLVED`, clave de agrupación, resumen sanitizado, `businessId` nullable, `openedAt`, `acknowledgedAt` nullable, `resolvedAt` nullable y `createdAt`.
+
+Una incidencia puede permanecer global cuando no exista tenant verificable. Las transiciones deben ser coherentes y las repeticiones se agrupan conservando contadores y momentos relevantes. No almacena credenciales, datos completos de tarjeta ni payloads sensibles. Las relaciones tipadas con eventos, trabajos o cobros y la política de retención permanecen pendientes.
+
+### Persistencia del worker
+
+El worker requiere trabajos persistentes con ejecución al menos una vez, idempotencia, programación, reserva temporal, intentos y recuperación después de reinicios. El nombre y estructura definitivos de la tabla de trabajos se resolverán antes del esquema Prisma; esta decisión no autoriza a introducir Redis, Kafka ni microservicios.
 
 ## Convenciones físicas PostgreSQL y Prisma
 
@@ -1657,8 +1782,8 @@ La canonicalización exacta de `requestHash` debe definirse antes de implementar
 
 ## Privilegios y protección append-only
 
-- El rol de aplicación tiene privilegios mínimos, no es propietario de las tablas y carece de privilegios ordinarios `UPDATE`, `DELETE` y `TRUNCATE` sobre `InventoryMovement` y `AuditLog`.
-- Triggers `BEFORE UPDATE OR DELETE` rechazan cambios ordinarios sobre ambas tablas. El rol de aplicación tampoco puede deshabilitarlos.
+- El rol de aplicación tiene privilegios mínimos, no es propietario de las tablas y carece de privilegios ordinarios `UPDATE`, `DELETE` y `TRUNCATE` sobre `InventoryMovement`, `AuditLog`, `PlatformAuditLog`, aceptaciones legales, cobros confirmados y ajustes financieros.
+- Triggers o privilegios equivalentes rechazan cambios ordinarios sobre los registros append-only. El rol de aplicación tampoco puede deshabilitar estas defensas.
 - El rol de migración posee privilegios DDL controlados, credenciales separadas y se utiliza solo en procesos autorizados.
 - Estas defensas protegen la operación normal, pero no prometen invulnerabilidad frente a un superusuario o propietario de la base.
 - Las correcciones de inventario utilizan movimientos compensatorios. La política futura de retención administrativa de `AuditLog` permanece pendiente.
@@ -1667,7 +1792,7 @@ La canonicalización exacta de `requestHash` debe definirse antes de implementar
 
 El nivel base será `READ COMMITTED`. Según la invariante se combinan restricciones `UNIQUE` como árbitro final, actualizaciones condicionales atómicas, `SELECT FOR UPDATE`, locks sobre filas raíz para reglas multirow, orden determinista de adquisición de locks y reintentos controlados ante deadlocks o conflictos.
 
-Esta estrategia debe aplicarse, entre otros casos, a la protección del último `OWNER ACTIVE`, la ubicación predeterminada, el stock no negativo, los límites acumulados de devoluciones y reembolsos, el trial y la suscripción abierta, y la reconfiguración controlada de variantes. Los `CHECK` solo validan una fila y no sustituyen transacciones para sumas, existencia de hijos o invariantes multirow.
+Esta estrategia debe aplicarse, entre otros casos, a la protección del último `OWNER ACTIVE`, la ubicación predeterminada, el stock no negativo, los límites acumulados de devoluciones y reembolsos, el trial y la suscripción abierta, el único proceso de cobro no resuelto, la aplicación única de identidades financieras, la extensión ordenada de cobertura y la reconfiguración controlada de variantes. Los `CHECK` solo validan una fila y no sustituyen transacciones para sumas, existencia de hijos o invariantes multirow.
 
 ## Decisiones transversales pendientes
 
@@ -1681,15 +1806,20 @@ Antes de construir el esquema físico deberán revisarse conjuntamente:
 - implementación física de invariantes que atraviesan múltiples filas o entidades;
 - mecanismo físico adicional para comprobar completitud y sincronización de combinaciones frente a escrituras directas, sin tratar `combinationKey` como garantía suficiente;
 - catálogo inicial de unidades y valores predeterminados de granularidad;
-- proveedor de pagos SaaS, evento confiable de confirmación, referencias externas e idempotencia de sus eventos;
-- modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos;
+- selección final del proveedor, contrato de autenticación y capacidades verificadas de Yape, Plin, tarjetas y expiración;
+- catálogos físicos de estados de checkout, resultado financiero, eventos y ajustes;
+- algoritmo determinista para confirmaciones tardías o fuera de orden;
+- estructura física de trabajos del worker, reservas, reintentos y limpieza;
 - tratamiento fiscal y snapshots definitivos de IGV;
 - cancelación voluntaria, cierre como `ENDED`, reactivación posterior y conservación de datos a largo plazo;
-- administración interna de la plataforma y reglas futuras de precios o cambios de plan;
+- alcance físico de concesiones de soporte, matriz administrativa y reautenticación de operaciones sensibles;
+- contenido, evidencias, retención y reglas de reaceptación de documentos legales;
+- política de retención/minimización de eventos e incidencias;
+- reglas futuras de precios o cambios de plan;
 
-Estas decisiones pendientes no modifican las relaciones y reglas conceptuales ya aprobadas en los cinco bloques.
+Estas decisiones pendientes no modifican las relaciones y reglas conceptuales ya aprobadas en los seis bloques.
 
-## Resumen de relaciones de los bloques 1, 2, 3, 4 y 5
+## Resumen de relaciones de los bloques 1, 2, 3, 4, 5 y 6
 
 ```text
 User 1 ─── N BusinessMembership N ─── 1 Business
@@ -1716,7 +1846,9 @@ User 1 ─── N BusinessMembership N ─── 1 Business
                     │                      │
                     │                      └── 1 ─── N Subscription N ─── 1 Plan
                     │                              │ (máximo una abierta y un trial histórico)
-                    │                              └── 1 ─── N SubscriptionPayment
+                    │                              ├── 1 ─── N SubscriptionPaymentAttempt
+                    │                              │               └── 1 ─── N SubscriptionPayment
+                    │                              └── 1 ─── N SubscriptionPaymentAdjustment
                     │
                     ├── 1 ─── N InventoryMovement para operaciones humanas V1
                     ├── 1 ─── N Sale
@@ -1726,6 +1858,12 @@ User 1 ─── N BusinessMembership N ─── 1 Business
                     └── 1 ─── 0..N AuditLog como actor humano opcional
 
 UnitOfMeasure 1 ─── N ProductVariant
+
+User 1 ─── 0..1 PlatformAdminMembership
+PlatformAdminMembership 1 ─── N PlatformSupportAccessGrant N ─── 1 Business
+PlatformAdminMembership 1 ─── N PlatformAuditLog
+LegalDocument 1 ─── N LegalDocumentAcceptance
+PaymentProviderEvent ─── 0..1 Business / Attempt / SubscriptionPayment tras conciliación
 
 Sale 1 ─── N SaleItem N ─── 1 ProductVariant
  │
@@ -1738,4 +1876,4 @@ Sale 1 ─── N SaleItem N ─── 1 ProductVariant
 
 Las ventas, anulaciones, devoluciones y reembolsos se conservan como operaciones históricas. Toda restitución al inventario vendible genera un nuevo `InventoryMovement.IN` sobre la combinación de variante y `Sale.locationId`; nunca modifica los movimientos originales.
 
-Con este Bloque 5 quedan cubiertas todas las entidades actualmente aprobadas del modelo conceptual, además de las entidades asociativas y de soporte incorporadas durante el refinamiento relacional. El documento todavía no diseña compras ni abastecimiento.
+Con el Bloque 6 quedan cubiertas las entidades actualmente aprobadas del modelo conceptual, incluidas administración, pagos SaaS y evidencia legal. El documento todavía no diseña compras ni abastecimiento y mantiene pendiente la estructura física definitiva de trabajos del worker.

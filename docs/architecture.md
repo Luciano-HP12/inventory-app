@@ -29,6 +29,13 @@ La aplicación estará preparada arquitectónicamente para funcionar como Progre
 
 El frontend puede aplicar validaciones para mejorar la experiencia, pero no constituye la autoridad para permisos, tenant, dinero, inventario ni otras reglas críticas.
 
+La V1 prevé dos aplicaciones frontend desplegables de forma independiente:
+
+- `apps/web`: aplicación comercial para membresías `OWNER` y `EMPLOYEE`;
+- `apps/admin`: aplicación interna para administración de la plataforma.
+
+`apps/admin` no amplía los permisos de `BusinessMembership`. Utiliza autorización administrativa propia, rutas separadas y auditoría reforzada. Compartir componentes visuales o contratos tipados no autoriza a compartir decisiones de acceso.
+
 ## Backend y API
 
 El backend utilizará:
@@ -55,6 +62,10 @@ Responsabilidades principales:
 No todas las operaciones necesitan obligatoriamente una capa artificial para cada paso. La organización debe conservar responsabilidades claras sin introducir abstracciones vacías.
 
 La validación de datos, autorización, aislamiento tenant y reglas de negocio se ejecutan en el backend. Los identificadores y valores enviados por el cliente no se consideran confiables hasta ser validados.
+
+`apps/web` y `apps/admin` comparten `apps/api`, pero la API separa explícitamente las rutas comerciales de las administrativas. Cada grupo utiliza middlewares de autorización distintos. Una sesión válida para la aplicación comercial no concede privilegios de plataforma y la interfaz administrativa no constituye por sí sola una frontera de seguridad.
+
+La arquitectura se mantiene como monolito modular. No se incorporan microservicios, Redis ni Kafka como requisitos de V1.
 
 ## Persistencia
 
@@ -92,7 +103,9 @@ El proyecto utilizará un monorepo sencillo:
 inventory-app/
 ├── apps/
 │   ├── web/
-│   └── api/
+│   ├── admin/
+│   ├── api/
+│   └── worker/
 ├── packages/
 │   └── shared/
 ├── docs/
@@ -102,11 +115,15 @@ inventory-app/
 ```
 
 - `apps/web/` contendrá el frontend.
+- `apps/admin/` contendrá el frontend interno de administración de plataforma.
 - `apps/api/` contendrá la API y la lógica del backend.
+- `apps/worker/` contendrá el proceso independiente de conciliación y tareas automáticas.
 - `packages/shared/` contendrá elementos compartidos cuando exista una necesidad concreta.
 - `docs/` conserva las decisiones del producto y la arquitectura.
 
 Esta estructura está aprobada como organización prevista, pero su presencia en este documento no significa que las aplicaciones o paquetes ya estén implementados.
+
+Los componentes podrán desplegarse independientemente. Desarrollo, staging y producción utilizarán configuraciones, credenciales y recursos separados. La configuración obligatoria se valida al iniciar cada proceso; un componente no debe continuar con valores inseguros o incompletos.
 
 ## Autenticación y autorización
 
@@ -151,7 +168,13 @@ Las renovaciones requieren consentimiento y confirmación confiable. Antes del v
 
 Los cambios de plan preservan el historial mediante períodos de suscripción distintos. Las reglas futuras de precios y cambios de plan permanecen pendientes.
 
-`Payment` pertenece exclusivamente a las ventas registradas por el negocio. La facturación SaaS constituye un dominio independiente, utiliza `SubscriptionPayment` para cobros confirmados y no reutiliza esa entidad. El proveedor y el modelo de intentos no confirmados todavía no están seleccionados.
+`Payment` pertenece exclusivamente a las ventas registradas por el negocio. La facturación SaaS constituye un dominio independiente y no reutiliza esa entidad. `SubscriptionPaymentAttempt` representa procesos no resueltos y `SubscriptionPayment` cobros confirmados y aplicados; el proveedor final todavía no está seleccionado.
+
+La V1 utiliza renovaciones manuales y no delega al proveedor una suscripción recurrente automática. Yape, Plin y tarjetas de débito o crédito son los medios requeridos. Culqi es una candidata inicial para pruebas sandbox, no una integración confirmada ni una dependencia del dominio.
+
+La integración se encapsula mediante un adaptador que crea checkouts, verifica notificaciones, consulta operaciones, reconcilia resultados y normaliza estados financieros. Los tipos, estados e identificadores propios de un proveedor no se exponen como modelo de dominio. Las redirecciones del navegador, capturas de pantalla y respuestas no verificadas nunca conceden cobertura.
+
+`SubscriptionPaymentAttempt`, `SubscriptionPayment`, `PaymentProviderEvent` y `SubscriptionPaymentAdjustment` separan respectivamente el checkout, el cobro confirmado y aplicado, la evidencia externa y los ajustes excepcionales. Los estados del checkout no se confunden con el resultado financiero.
 
 Las reglas completas se documentan en `subscriptions-and-billing.md`.
 
@@ -223,18 +246,43 @@ El servicio serializa cada clave idempotente mediante un advisory transaction lo
 
 La aplicación y las migraciones utilizan roles PostgreSQL separados. El rol de aplicación aplica mínimos privilegios y no es propietario de las tablas; el rol de migración conserva DDL controlado. `InventoryMovement` y `AuditLog` tienen protección append-only mediante privilegios y triggers para la operación ordinaria.
 
+### Worker y conciliación
+
+El worker es un proceso separado de la API HTTP, dentro del mismo monolito modular, y se coordina inicialmente mediante PostgreSQL. Atiende conciliación, reintentos seguros, recuperación de trabajos interrumpidos, operaciones prolongadas y mantenimiento autorizado.
+
+El procesamiento es al menos una vez. Cada trabajo debe ser idempotente, utilizar una reserva temporal recuperable, controlar concurrencia y registrar sus reintentos sin incluir secretos. Los errores persistentes se convierten en incidencias operativas.
+
+La conciliación inicial se programa aproximadamente cada minuto durante los primeros 15 minutos, cada cinco minutos hasta una hora, cada 30 minutos hasta 24 horas y después mediante seguimiento periódico y revisión de soporte. Estos intervalos son configurables y deben ajustarse a las capacidades y límites del proveedor.
+
+El worker facilita la conciliación, pero no determina por sí mismo el acceso efectivo: el backend lo calcula con los períodos persistidos y el reloj confiable.
+
+### Operación, despliegue y recuperación
+
+Las incidencias persistentes tienen prioridad alta, media o informativa y estado `OPEN`, `ACKNOWLEDGED` o `RESOLVED`. Las críticas producen notificaciones por correo, las repeticiones se agrupan y `apps/admin` ofrece un panel básico. La supervisión de vida del worker se realiza desde un mecanismo independiente del propio worker.
+
+Los respaldos son automáticos, cifrados, al menos diarios y se almacenan separadamente. Se prioriza recuperación puntual de PostgreSQL y se prueban restauraciones periódicas. RPO de una hora y RTO de cuatro horas son objetivos internos sujetos a validación técnica y presupuesto, no garantías comerciales.
+
+El modo de recuperación financiera, activado solo por administradores autorizados, restringe temporalmente nuevos cobros, reconcilia operaciones externas posteriores a la restauración, comprueba suscripciones, cobertura y datos comerciales afectados, audita las intervenciones y reactiva cobros únicamente después de verificar consistencia.
+
+La integración continua validará pruebas unitarias, de integración y E2E, incluido aislamiento tenant, inventario, ventas, suscripciones, pagos, idempotencia, concurrencia y recuperación. Staging y aprobación explícita preceden a producción. Las migraciones son versionadas y aplican expandir → migrar → contraer cuando corresponda, con procedimientos de reversión o recuperación y trazabilidad de despliegue. Vitest y Playwright son herramientas candidatas, no implementadas.
+
+Antes de habilitar clientes comerciales y pagos reales deben verificarse las funcionalidades esenciales; aislamiento y permisos; pagos reales; conciliación e idempotencia; worker y alertas; respaldos y restauración; CI/CD, staging y migraciones; revisión legal, tributaria y de protección de datos; ausencia de vulnerabilidades críticas o defectos bloqueantes; y autorización explícita de lanzamiento.
+
 ## Decisiones pendientes
 
 - Proveedor de autenticación y detalles de integración.
-- Proveedor de facturación SaaS, evento confiable de confirmación e integración externa.
-- Modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos.
+- Selección final del proveedor de pagos y verificación sandbox de Yape, Plin, tarjetas, expiración y autenticación de notificaciones.
+- Catálogos físicos de estados de checkout, resultado financiero, eventos y ajustes.
 - Tratamiento fiscal y snapshots definitivos de IGV.
 - Límites y capacidades comerciales de los planes; `PlanFeature` queda fuera de la V1 implementable.
 - Cancelación voluntaria, cierre como `ENDED`, reactivación posterior y conservación de datos a largo plazo.
-- Administración interna de la plataforma y reglas futuras de precios o cambios de plan.
+- Alcance detallado de permisos administrativos, políticas de autenticación reforzada y tratamiento de ajustes excepcionales.
+- Contenido, versiones y requisitos externos de los documentos legales.
+- Reglas futuras de precios o cambios de plan.
 - Canonicalización exacta del hash idempotente, derivación del identificador del advisory lock y detalle de locking de los demás flujos.
 - Catálogo inicial de unidades y valores predeterminados de granularidad.
 - Métricas operativas e infraestructura de despliegue.
+- Validación presupuestaria y técnica de RPO, RTO, almacenamiento de respaldos, correo de alertas y supervisión externa del worker.
 
 No deben inferirse mecanismos, garantías ni condiciones comerciales hasta que sean aprobados.
 

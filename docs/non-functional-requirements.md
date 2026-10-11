@@ -8,7 +8,7 @@ La aplicación utiliza PostgreSQL como base de datos relacional y Prisma como OR
 
 El backend debe organizar sus controles y operaciones de forma modular y reutilizable. Las reglas críticas no deben existir únicamente en la interfaz ni quedar duplicadas de manera inconsistente entre distintos flujos.
 
-El diseño debe soportar múltiples negocios y múltiples ubicaciones por negocio sin sacrificar el aislamiento. No se definen todavía métricas de disponibilidad, latencia, capacidad, RPO, RTO ni una infraestructura concreta de despliegue.
+El diseño debe soportar múltiples negocios y múltiples ubicaciones por negocio sin sacrificar el aislamiento. No se definen todavía métricas comerciales de disponibilidad, latencia o capacidad ni una infraestructura concreta de despliegue. RPO y RTO se documentan más adelante únicamente como objetivos internos por validar.
 
 ## Seguridad y aislamiento multi-tenant
 
@@ -111,9 +111,11 @@ Las operaciones sensibles deben poder generar registros de auditoría. `AuditLog
 
 Los pagos de ventas registrados por un negocio y la facturación de suscripciones de Inventory App son dominios separados.
 
-La facturación SaaS utilizará un proveedor externo todavía no seleccionado. Inventory App no almacenará directamente datos sensibles de tarjetas y no considerará confirmado un pago o activada una suscripción basándose únicamente en información enviada por el frontend.
+La facturación SaaS utilizará un proveedor externo todavía no seleccionado; Culqi es solo candidata inicial para sandbox. Inventory App no almacenará directamente datos sensibles de tarjetas y no considerará confirmado un pago o activada una suscripción basándose únicamente en información enviada por el frontend.
 
 `SubscriptionPayment` conserva cobros SaaS confirmados, sus importes y períodos cubiertos; no reutiliza `Payment`. La confirmación confiable, la creación del registro y la ampliación de `currentPeriodEndsAt` deben ser atómicas e idempotentes. Los intentos pendientes, fallidos o rechazados no amplían cobertura.
+
+La identidad financiera por proveedor, cuenta y referencia es única. Los checkouts, resultados financieros y eventos externos utilizan estados separados. La integración debe soportar entrega repetida, retrasada o fuera de orden y no mantener transacciones de base de datos abiertas mientras espera una llamada externa.
 
 ## Onboarding, trial y ciclo de datos
 
@@ -137,6 +139,51 @@ Las ventas realizadas durante una interrupción no deben regularizarse únicamen
 
 El modo offline con almacenamiento local, sincronización automática y resolución de conflictos queda fuera del alcance de la V1.
 
+## Worker y procesamiento diferido
+
+El worker se ejecuta separado de la API HTTP y se coordina inicialmente mediante PostgreSQL. No requiere Redis, Kafka ni microservicios en V1.
+
+Los trabajos se procesan al menos una vez y deben ser idempotentes. Utilizan reservas temporales, recuperación tras reinicios, control de concurrencia, reintentos progresivos y escalamiento de errores persistentes. Una reserva abandonada debe poder recuperarse sin duplicar efectos financieros.
+
+La conciliación de pagos pendientes utiliza intervalos configurables: aproximadamente cada minuto durante 15 minutos, cada cinco minutos hasta una hora, cada 30 minutos hasta 24 horas y seguimiento periódico posterior. Los límites reales del proveedor prevalecen sobre esta programación inicial.
+
+## Monitoreo e incidencias
+
+Las incidencias se conservan persistentemente con prioridad alta, media o informativa y estado `OPEN`, `ACKNOWLEDGED` o `RESOLVED`. Las ocurrencias repetidas se agrupan sin ocultar su frecuencia ni último momento.
+
+Las incidencias críticas generan notificaciones por correo y se muestran en un panel básico de `apps/admin`. La vida del worker debe supervisarse desde un mecanismo independiente para evitar que el mismo proceso averiado sea responsable de reportar su falla. Registros y alertas excluyen credenciales, datos completos de tarjeta y payloads sensibles innecesarios.
+
+## Respaldos y recuperación
+
+Los respaldos de PostgreSQL son automáticos, cifrados, al menos diarios y se almacenan en una ubicación protegida y separada. Se prioriza la recuperación puntual y se realizan pruebas periódicas de restauración.
+
+El RPO objetivo es una hora y el RTO objetivo cuatro horas. Son objetivos internos sujetos a validación técnica y presupuesto, no garantías comerciales confirmadas.
+
+El modo de recuperación operativa restringe nuevos cobros, reconcilia operaciones externas posteriores a la restauración, verifica integridad de suscripciones y cobertura, comprueba independientemente datos comerciales afectados, audita intervenciones y reactiva el flujo financiero solo después de validar consistencia.
+
+## CI/CD, pruebas y migraciones
+
+Antes de integrar cambios se ejecutan validaciones automáticas. La estrategia incluye pruebas unitarias, de integración y E2E, con casos obligatorios de aislamiento multi-tenant, inventario, ventas, suscripciones, pagos, idempotencia, concurrencia y recuperación. Vitest y Playwright son herramientas candidatas, no capacidades implementadas.
+
+Los cambios se validan en staging y requieren aprobación explícita antes de producción. Las migraciones son versionadas y controladas; cuando corresponda aplican expandir → migrar → contraer. Cada despliegue es identificable y trazable y dispone de un procedimiento de reversión o recuperación compatible con cambios de datos.
+
+## Production Readiness Gate
+
+No se habilitan clientes comerciales ni pagos reales hasta verificar:
+
+1. funcionalidades esenciales operativas;
+2. aislamiento multi-tenant y permisos;
+3. integración de pagos reales;
+4. conciliación e idempotencia;
+5. worker y alertas;
+6. respaldos y restauración;
+7. CI/CD, staging y migraciones;
+8. revisión legal, tributaria y de protección de datos;
+9. ausencia de vulnerabilidades críticas conocidas sin mitigar y defectos bloqueantes;
+10. autorización explícita de lanzamiento.
+
+La documentación de un requisito no acredita su implementación ni su verificación.
+
 ## Mantenibilidad y evolución
 
 El código y el modelo deben mantener responsabilidades claras, validaciones centralizadas y reglas de dominio verificables. Las decisiones deben permanecer documentadas y los cambios futuros deben preservar el aislamiento, la trazabilidad y la compatibilidad con el historial existente.
@@ -156,11 +203,12 @@ Posibles evoluciones futuras ya identificadas, pero fuera del alcance actual, in
 - Mecanismo concreto de locking y orden de adquisición por operación dentro de la estrategia aprobada; para idempotencia queda pendiente la derivación exacta del identificador del advisory lock.
 - Canonicalización exacta del hash idempotente.
 - Catálogo inicial de unidades y valores predeterminados de `quantityStep`.
-- Proveedor y evento confiable de confirmación de cobros SaaS; modelo de intentos pendientes, fallidos, rechazados o revertidos.
+- Proveedor y evento confiable de confirmación de cobros SaaS; catálogos físicos de checkout, resultado financiero y eventos.
 - Tratamiento fiscal y snapshots definitivos de IGV.
 - Cancelación voluntaria, cierre como `ENDED`, reactivación posterior y conservación de datos a largo plazo.
 - Administración interna de la plataforma, límites comerciales y reglas futuras de precios o cambios de plan.
-- Métricas futuras de disponibilidad, rendimiento, capacidad, RPO y RTO.
+- Validación técnica y presupuestaria de RPO/RTO, almacenamiento de respaldos, frecuencia de restauraciones y recuperación puntual.
+- Herramientas definitivas de CI/CD, pruebas, correo de alertas, monitoreo y supervisión del worker.
 - Infraestructura y estrategia de despliegue.
 
 Estas decisiones pendientes no autorizan a asumir valores o garantías que todavía no han sido aprobados.

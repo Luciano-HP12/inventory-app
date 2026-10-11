@@ -13,9 +13,11 @@ El dominio de facturación SaaS no reutiliza `Payment` ni se mezcla con las vent
 
 Los cobros de Inventory App se representan conceptualmente mediante `SubscriptionPayment`, separados de los pagos que los negocios reciben de sus clientes.
 
+La V1 utiliza renovaciones manuales. No se configura un cobro recurrente automático por el vencimiento del trial o de un período pagado.
+
 ## Plan
 
-`Plan` representa una oferta del SaaS. Tiene un código técnico estable, un nombre visible y un estado de actividad. La V1 ofrece únicamente el plan `Esencial`, con precio anunciado de S/ 99.90 por cada período fijo de 30 × 24 horas, con IGV incluido cuando corresponda.
+`Plan` representa una oferta del SaaS. Tiene un código técnico estable, un nombre visible y un estado de actividad. La V1 ofrece únicamente el plan `Esencial`, con precio previsto de S/ 99.90 por cada período fijo de 30 × 24 horas, con impuestos incluidos cuando corresponda.
 
 Un plan inactivo no se ofrece para nuevas suscripciones, pero continúa existiendo para preservar las suscripciones históricas que lo referencian.
 
@@ -89,15 +91,53 @@ La suspensión no elimina datos, historial ni membresías. Todas las consultas y
 
 Una suscripción `ENDED` no se reabre; la reactivación después de un cierre definitivo continúa pendiente y, conforme al modelo vigente, requeriría una nueva suscripción. El historial de contrataciones, cobros y períodos cubiertos debe preservarse.
 
-## Facturación SaaS
+## Checkout y facturación SaaS
 
-`SubscriptionPayment` representa un cobro confirmado del negocio por su suscripción a Inventory App. Una suscripción puede tener múltiples cobros históricos. Cada registro conserva el importe y las condiciones monetarias aplicadas, así como el intervalo de cobertura adquirido. Esta entidad no representa pagos de ventas ni reembolsos que el negocio realiza a sus propios clientes.
+La V1 debe permitir Yape, Plin y tarjetas de débito o crédito. Culqi es únicamente una candidata inicial para pruebas sandbox. La selección final depende de verificar sus capacidades reales, contratos, autenticación, expiración, conciliación y medios de pago.
 
-La facturación utilizará posteriormente un proveedor o pasarela externa todavía no seleccionada.
+La integración utiliza un adaptador independiente del proveedor para crear checkout, verificar notificaciones, consultar operaciones, reconciliar resultados y normalizar estados. Ningún identificador o estado particular de Culqi forma parte del lenguaje central del dominio.
 
-Inventory App no almacenará directamente datos sensibles de tarjetas. El backend no confiará únicamente en información enviada por el frontend para activar una suscripción; la confirmación deberá proceder de un mecanismo confiable del proveedor elegido.
+`SubscriptionPaymentAttempt` representa un intento de checkout. Conserva por separado:
 
-Todavía no se define qué evento concreto y verificable confirma un cobro, una renovación o la transición a `ACTIVE`. Tampoco se definen estados ni persistencia para intentos pendientes, fallidos, rechazados o revertidos.
+- el estado técnico del checkout;
+- el resultado financiero conocido;
+- el importe y la moneda esperados;
+- la identidad del negocio, la suscripción y el `OWNER` que lo inició;
+- el proveedor, su cuenta y las referencias externas disponibles;
+- los momentos de creación, expiración y resolución.
+
+Solo puede existir un proceso de pago no resuelto por `Business`. La vigencia inicial del checkout es de 15 minutos, condicionada a la capacidad real de la pasarela. Una expiración de interfaz o un timeout no demuestran rechazo definitivo: no se inicia otro cobro mientras el anterior todavía pueda producir un cargo.
+
+`SubscriptionPayment` representa un cobro real, distinto, confirmado y aplicado. Debe asociarse obligatoriamente a un intento válido y conserva el importe, moneda, instante confiable de confirmación y período de 720 horas adquirido. La identidad financiera `(provider, providerAccountReference, externalPaymentReference)` es única y un mismo cobro no puede aplicar cobertura dos veces.
+
+Cada cobro real distinto y confirmado agrega 720 horas. Las confirmaciones tardías utilizan el instante confiable informado o verificado con el proveedor, no el momento en que llegó el webhook. La regla determinista para procesar varios cobros fuera de orden debe cerrarse antes de implementar.
+
+`PaymentProviderEvent` conserva las notificaciones externas. Los eventos deben autenticarse, deduplicarse y procesarse idempotentemente. Un evento sin correspondencia interna verificable queda en conciliación y no se asigna arbitrariamente a un tenant ni concede cobertura.
+
+`SubscriptionPaymentAdjustment` registra ajustes financieros excepcionales sin modificar el cobro original. Son exclusivos de administradores de plataforma autorizados, requieren motivo y auditoría y no incorporan reembolsos ordinarios por desistimiento en la V1. Su posible efecto sobre cobertura requiere una decisión explícita.
+
+Inventory App no almacena datos completos de tarjetas ni secretos del proveedor. El backend no concede cobertura por una redirección del navegador, captura de pantalla o respuesta no verificada. Los cobros duplicados reales se registran y escalan como incidencias financieras.
+
+## Conciliación
+
+El worker consulta y reconcilia procesos no resueltos mediante el adaptador. Debe tolerar eventos retrasados, repetidos o desordenados, reintentos y reinicios. El procesamiento es al menos una vez e idempotente.
+
+Política inicial configurable:
+
+- aproximadamente cada minuto durante los primeros 15 minutos;
+- aproximadamente cada cinco minutos desde 15 minutos hasta una hora;
+- aproximadamente cada 30 minutos desde una hasta 24 horas;
+- seguimiento periódico y revisión de soporte después de 24 horas.
+
+El worker no reemplaza la verificación en línea del acceso efectivo ni convierte automáticamente un timeout en rechazo.
+
+## Consentimiento de contratación
+
+Antes de crear el checkout, el usuario autorizado debe aceptar explícitamente la versión aplicable de los términos y dejar constancia de conocimiento de la versión del aviso de privacidad. Las evidencias se conservan de forma inmutable y se vinculan con el usuario, negocio, membresía y proceso de contratación cuando corresponda.
+
+Los consentimientos opcionales de privacidad son independientes y no se presumen por aceptar términos o contratar. El contenido legal, la forma probatoria y las obligaciones tributarias o de protección de datos deben validarse externamente.
+
+Todavía no se define qué evento concreto y verificable confirma un cobro con el proveedor finalmente seleccionado. Tampoco están aprobados los catálogos físicos definitivos de estados de checkout, resultado financiero, conciliación y ajustes.
 
 ## Finalización y conservación de datos
 
@@ -112,16 +152,20 @@ La política de lectura y exportación durante la suspensión es la definida ant
 
 ## Decisiones pendientes
 
-- Proveedor de facturación y contratos de integración.
+- Selección final del proveedor y contratos de integración.
+- Capacidades reales de Yape, Plin, tarjetas, expiración y autenticación de notificaciones en sandbox.
 - Evento confiable que confirma un cobro o permite activar una suscripción.
-- Modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos.
+- Catálogos físicos de estados de checkout, resultado financiero, eventos y ajustes.
+- Regla determinista para confirmaciones tardías o fuera de orden.
+- Política de retención y minimización de payloads del proveedor.
 - Tratamiento fiscal y snapshots definitivos de IGV.
 - Política de cancelación voluntaria y momento en que una suscripción pasa a `ENDED`.
 - Reactivación después de un cierre definitivo.
 - Política de conservación de datos a largo plazo.
 - Límites de usuarios y demás capacidades concretas de `Esencial`.
 - Reglas de precios futuros y cambios de plan.
-- Identidad, autorización y alcance de la administración interna de la plataforma.
-- Atributos de integración externa de `SubscriptionPayment` una vez seleccionado el proveedor.
+- Alcance detallado de permisos administrativos y soporte temporal.
+- Efecto permitido de ajustes excepcionales sobre dinero y cobertura.
+- Contenido, versiones y evidencias legales definitivas.
 
 Los detalles relacionales se documentan en `docs/relational-data-model.md`. Estas reglas no autorizan a inventar estados de cobro, atributos fiscales ni mecanismos del proveedor todavía no aprobados.

@@ -119,7 +119,7 @@ La conexión normal de la aplicación utiliza un rol PostgreSQL con privilegios 
 
 `Payment` representa exclusivamente pagos de ventas registrados por el negocio. La facturación SaaS pertenece a un dominio independiente y no reutiliza esa entidad ni sus reportes comerciales.
 
-Inventory App no almacenará directamente datos sensibles de tarjetas. La facturación SaaS será procesada posteriormente mediante un proveedor externo todavía no seleccionado.
+Inventory App no almacenará directamente datos sensibles de tarjetas. La facturación SaaS será procesada mediante un proveedor externo todavía no seleccionado; Culqi es únicamente candidata para pruebas sandbox.
 
 El backend no confiará únicamente en información enviada por el frontend para confirmar pagos o activar una suscripción. La confirmación deberá proceder de mecanismos confiables del proveedor elegido.
 
@@ -135,7 +135,35 @@ Durante la suspensión, las consultas y exportaciones permitidas a `OWNER` sigue
 
 La administración interna de la plataforma es un ámbito separado. Los roles `OWNER` y `EMPLOYEE` no otorgan administración global ni acceso implícito a otros negocios.
 
+`PlatformAdminMembership` es independiente de `BusinessMembership`, utiliza inicialmente el rol `PLATFORM_ADMIN`, puede revocarse y exige autenticación reforzada, MFA y autorización backend para cada operación. `apps/admin` y sus rutas separadas no sustituyen estos controles.
+
+Una membresía administrativa no habilita consultas indiscriminadas de tenants. Todo acceso excepcional de soporte es de solo lectura, queda limitado a un negocio y recursos autorizados, exige motivo, expira como máximo a los 60 minutos, puede revocarse y genera auditoría administrativa. Los ajustes financieros y las operaciones de recuperación también requieren actor administrativo identificable y trazabilidad.
+
+## Seguridad de la integración de pagos
+
+La integración SaaS utiliza un adaptador de proveedor. Culqi es candidata sandbox, no proveedor confirmado. Las credenciales y secretos solo existen en backend/worker, se separan por entorno y nunca se exponen a `apps/web` o `apps/admin` salvo claves públicas específicamente autorizadas por el proveedor.
+
+Los webhooks deben autenticarse conforme al contrato verificado del proveedor, protegerse contra replay, deduplicarse y tolerar entrega repetida o fuera de orden. El contenido autenticado se conserva o resume con minimización y retención controladas; no se registran secretos ni datos completos de tarjeta.
+
+Antes de aplicar un cobro se validan proveedor, cuenta, referencia financiera, intento, importe, moneda, negocio y suscripción. Una redirección del navegador, una captura de pantalla, un timeout o metadata no verificada no constituyen confirmación.
+
+La identidad financiera `(provider, providerAccountReference, externalPaymentReference)` debe ser única. La creación de `SubscriptionPayment`, su período y la actualización de cobertura forman una transacción local idempotente después de verificar la evidencia externa; no se mantiene una transacción PostgreSQL abierta durante llamadas a la pasarela.
+
+Un evento sin correlación interna inequívoca queda en conciliación sin asignarse arbitrariamente a un tenant. Los cobros reales duplicados se registran como incidentes financieros y no se ocultan sobrescribiendo registros.
+
 Las credenciales, secretos y datos sensibles no deben exponerse en código, registros, documentación, repositorios ni respuestas al cliente.
+
+La configuración obligatoria se valida al iniciar cada componente. Desarrollo, staging y producción utilizan credenciales separadas y mínimo privilegio. El repositorio debe incorporar detección automatizada de secretos; ante una exposición se revocan o rotan las credenciales y se registra el incidente, sin considerar suficiente eliminar el texto del último commit.
+
+## Consentimiento y privacidad
+
+La contratación exige aceptación explícita de términos versionados y constancia de conocimiento del aviso de privacidad aplicable. La evidencia es inmutable y debe identificar documento, versión, actor, contexto e instante. Los consentimientos opcionales se solicitan y revocan separadamente; no se infieren de la contratación.
+
+Las evidencias como dirección IP, agente de usuario u otros datos solo se incorporarán si son necesarias y han sido revisadas legalmente. Su retención, acceso y protección deben definirse antes de implementar.
+
+## Recuperación operativa
+
+Solo administradores autorizados pueden activar el modo de recuperación. Este restringe nuevos cobros, audita intervenciones y exige conciliar pagos externos, verificar cobertura y comprobar independientemente los datos comerciales afectados antes de reactivar operaciones financieras.
 
 ## Prevención gradual de abuso
 
@@ -159,6 +187,9 @@ Los controles de autenticación, autorización, tenant, validación, transaccion
 - Catálogo definitivo y política de retención de auditoría.
 - Proveedor de facturación SaaS y mecanismo confiable de confirmación.
 - Modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos e idempotencia de eventos del proveedor.
-- Identidad, autorización, auditoría y alcance de la administración interna de la plataforma.
+- Contrato exacto de autenticación, replay, consulta y retención para el proveedor seleccionado.
+- Permisos administrativos detallados, reautenticación de operaciones sensibles y recursos accesibles mediante soporte temporal.
+- Requisitos legales y técnicos de evidencia para documentos y consentimientos.
+- Herramienta de detección de secretos, canal de correo para alertas y supervisión externa del worker.
 
-No se presuponen MFA, políticas de recuperación ni mecanismos antifraude adicionales mientras no sean aprobados.
+MFA es obligatorio para administradores de plataforma. MFA para usuarios comerciales con rol `OWNER` o `EMPLOYEE`, las políticas de recuperación y los mecanismos antifraude adicionales no se presuponen mientras no sean aprobados.

@@ -33,9 +33,11 @@ La documentación actual contempla:
 - prueba gratuita única de 30 × 24 horas, sin cobro automático ni período de gracia;
 - períodos pagados de 30 × 24 horas, renovaciones consentidas y 72 horas de gracia exclusivamente después de su vencimiento;
 - suspensión con acceso de lectura y exportación para `OWNER`, sin eliminación automática de datos;
+- checkout manual para renovar mediante Yape, Plin o tarjetas, sin cobros recurrentes automáticos;
+- conciliación de pagos y administración interna mediante componentes separados de la aplicación comercial;
 - preparación arquitectónica para PWA, sin sincronización offline automática en V1.
 
-El precio anunciado de `Esencial` es S/ 99.90 por cada período fijo de 30 × 24 horas, con IGV incluido cuando corresponda. No se utilizan meses calendario. Los estados físicos de suscripción continúan siendo `TRIALING`, `ACTIVE` y `ENDED`; la gracia y la suspensión se derivan en el backend según el tiempo real. La pasarela de pagos, los límites comerciales, el tratamiento fiscal definitivo y la política de conservación a largo plazo todavía no están definidos.
+El precio previsto de `Esencial` es S/ 99.90 por cada período fijo de 30 × 24 horas, con impuestos incluidos cuando corresponda. No se utilizan meses calendario. Los estados físicos de suscripción continúan siendo `TRIALING`, `ACTIVE` y `ENDED`; la gracia y la suspensión se derivan en el backend según el tiempo real. Culqi es únicamente la primera candidata para pruebas sandbox: la integración utilizará un adaptador independiente del proveedor. Los límites comerciales, el tratamiento fiscal definitivo y la política de conservación a largo plazo todavía no están definidos.
 
 ## Roadmap comercial
 
@@ -58,14 +60,18 @@ La seguridad, integridad, aislamiento multiempresa y respaldos son requisitos co
 inventory-app/
 ├── apps/
 │   ├── web/
-│   └── api/
+│   ├── admin/
+│   ├── api/
+│   └── worker/
 ├── packages/
 │   └── shared/
 └── docs/
 ```
 
 - `apps/web`: aplicación frontend.
+- `apps/admin`: aplicación interna de administración de plataforma, separada de los roles comerciales.
 - `apps/api`: API y reglas de negocio.
+- `apps/worker`: proceso independiente para conciliación y tareas automáticas, coordinado inicialmente mediante PostgreSQL.
 - `packages/shared`: código compartido cuando exista una necesidad concreta.
 - `docs`: decisiones funcionales, arquitectónicas y de datos.
 
@@ -75,7 +81,7 @@ Esta es la estructura aprobada para la implementación futura; todavía no se en
 
 El proyecto se encuentra en fase de diseño y consolidación documental.
 
-Actualmente están documentados la arquitectura, los modelos conceptual y relacional, y las reglas principales de seguridad, suscripciones, roles, variantes, inventario y ventas. Todavía no existen una aplicación frontend funcional, una API operativa, un esquema Prisma, migraciones de base de datos ni un despliegue.
+Actualmente están documentados la arquitectura, los modelos conceptual y relacional, y las reglas principales de seguridad, suscripciones, roles, variantes, inventario, ventas, pagos SaaS y operación de plataforma. Todavía no existen frontends funcionales, una API o worker operativos, un esquema Prisma, migraciones de base de datos, integración de pagos ni un despliegue.
 
 Por ese motivo, aún no hay instrucciones de instalación o ejecución de aplicaciones.
 

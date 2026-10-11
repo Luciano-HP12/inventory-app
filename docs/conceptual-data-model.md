@@ -11,7 +11,14 @@ Este documento presenta las entidades principales de Inventory App, sus relacion
 - `BusinessMembership`
 - `Plan`
 - `Subscription`
+- `SubscriptionPaymentAttempt`
 - `SubscriptionPayment`
+- `PaymentProviderEvent`
+- `SubscriptionPaymentAdjustment`
+- `LegalDocument`
+- `LegalDocumentAcceptance`
+- `PlatformAdminMembership`
+- `PlatformSupportAccessGrant`
 - `Location`
 
 ### Catálogo
@@ -44,6 +51,8 @@ Este documento presenta las entidades principales de Inventory App, sus relacion
 
 - `AuditLog`
 - `IdempotencyRecord`
+- `PlatformAuditLog`
+- `OperationalIncident`
 
 ## Tenant, usuarios y membresías
 
@@ -71,13 +80,15 @@ La autenticación de `User` será administrada por un proveedor externo todavía
 
 ## Planes, suscripciones y trial
 
-`Plan` representa una oferta del SaaS. Puede ser referenciado por múltiples suscripciones y permanece separado de los pagos de ventas del negocio. La V1 ofrece únicamente `Esencial`, con precio anunciado de S/ 99.90 por un período fijo de 30 × 24 horas, con IGV incluido cuando corresponda.
+`Plan` representa una oferta del SaaS. Puede ser referenciado por múltiples suscripciones y permanece separado de los pagos de ventas del negocio. La V1 ofrece únicamente `Esencial`, con precio previsto de S/ 99.90 por un período fijo de 30 × 24 horas, con impuestos incluidos cuando corresponda.
 
 Las relaciones conceptuales son:
 
 ```text
 Business 1:N Subscription N:1 Plan
 Subscription 1:N SubscriptionPayment
+Subscription 1:N SubscriptionPaymentAttempt
+SubscriptionPaymentAttempt 1:N SubscriptionPayment
 ```
 
 Un negocio conserva el historial de suscripciones, con estas reglas:
@@ -97,7 +108,13 @@ La cobertura pagada utiliza `currentPeriodEndsAt` como límite superior exclusiv
 
 Durante la gracia el negocio continúa operando y recibe avisos. Tras 72 horas sin renovación confirmada, una membresía `OWNER ACTIVE` conserva lectura y exportación de los datos de su negocio y acceso a la renovación, pero no puede efectuar modificaciones operativas o administrativas. Una membresía `EMPLOYEE ACTIVE` solo puede autenticarse, ver el aviso y cerrar sesión. La suspensión no elimina datos, historial ni membresías.
 
-`SubscriptionPayment` registra cobros confirmados del negocio a Inventory App, los períodos de cobertura adquiridos y snapshots de las condiciones monetarias aplicadas. Se mantiene separado de `Payment`, que representa exclusivamente cobros de ventas realizados por el negocio. Los intentos pendientes, fallidos, rechazados o revertidos no amplían cobertura y su modelo permanece pendiente.
+`SubscriptionPaymentAttempt` representa el proceso de checkout. Su estado de checkout y su resultado financiero son conceptos diferentes: expirar o cerrar la interfaz no demuestra rechazo del pago. Solo puede existir un proceso no resuelto por negocio; mientras el proveedor todavía pueda producir un cargo no se inicia otro. La vigencia inicial visible es de 15 minutos, condicionada a las capacidades verificadas del proveedor.
+
+`SubscriptionPayment` registra un cobro real, distinto, confirmado y aplicado, asociado obligatoriamente a un intento válido. Conserva el período de cobertura adquirido y snapshots de las condiciones monetarias. Cada identidad financiera única del proveedor, su cuenta y referencia se aplica como máximo una vez; cada cobro distinto confirmado agrega exactamente 720 horas. Se mantiene separado de `Payment`, que representa exclusivamente cobros de ventas realizados por el negocio.
+
+`PaymentProviderEvent` conserva un evento externo autenticado y permite deduplicarlo, procesarlo o mantenerlo en conciliación. Puede recibirse antes de identificar de forma verificable un tenant; en ese caso no concede cobertura ni se asigna arbitrariamente a un negocio. Eventos retrasados, repetidos o desordenados deben converger al mismo resultado.
+
+`SubscriptionPaymentAdjustment` representa un ajuste financiero excepcional, independiente e inmutable, realizado por un administrador autorizado. No reescribe el cobro original ni introduce reembolsos ordinarios por desistimiento en V1. Su efecto exacto sobre dinero o cobertura debe quedar explícito y auditado.
 
 Las capacidades configurables de planes futuros no se modelan mediante `PlanFeature` en la V1. Los límites concretos de usuarios y demás recursos de `Esencial` siguen pendientes. Seguridad, integridad, aislamiento multi-tenant y respaldos son garantías comunes, no funcionalidades opcionales de un plan.
 
@@ -105,7 +122,17 @@ Las capacidades configurables de planes futuros no se modelan mediante `PlanFeat
 
 La administración de Inventory App es un ámbito independiente del tenant. Los roles `OWNER` y `EMPLOYEE` solo expresan permisos dentro de un `Business` y nunca conceden administración de la plataforma, planes globales, pagos SaaS ni otros negocios.
 
-No se incorpora todavía una entidad ni un rol definitivo de administrador de plataforma. Su identidad, autorización, auditoría y operaciones permitidas deberán diseñarse separadamente antes de implementarse.
+`PlatformAdminMembership` relaciona un `User` global con la administración interna de Inventory App. Su rol inicial es `PLATFORM_ADMIN`, separado de `OWNER` y `EMPLOYEE`, con estado revocable, autenticación reforzada, MFA y auditoría administrativa.
+
+Una membresía administrativa no concede acceso comercial ilimitado a los tenants. `PlatformSupportAccessGrant` representa una autorización excepcional de soporte: solo lectura, limitada a un negocio y a recursos expresamente autorizados, con motivo obligatorio, duración máxima inicial de 60 minutos, revocación y auditoría.
+
+`PlatformAuditLog` conserva las actuaciones administrativas y no utiliza una `BusinessMembership` ficticia. Los ajustes financieros, accesos de soporte, cambios de permisos y acciones de recuperación deben ser auditables.
+
+### Consentimiento y documentos legales
+
+`LegalDocument` representa una versión inmutable de un documento legal mediante identidad, tipo, versión y evidencia del contenido. `LegalDocumentAcceptance` conserva quién aceptó esa versión, cuándo, en qué contexto y, cuando corresponda, a qué negocio y checkout se vinculó.
+
+Antes de contratar deben existir aceptación explícita de los términos aplicables y constancia de conocimiento del aviso de privacidad. Los consentimientos opcionales de privacidad se mantienen separados y no se presumen a partir de la contratación. El contenido definitivo, requisitos legales y evidencias técnicas necesarias deben validarse externamente.
 
 ## Ubicaciones y catálogo
 
@@ -277,6 +304,8 @@ Los registros históricos de auditoría no se editan ni eliminan mediante la ope
 
 `IdempotencyRecord` pertenece a un negocio y registra la identidad técnica de una solicitud crítica para que sus reintentos no dupliquen ventas, anulaciones, devoluciones, reembolsos ni operaciones de inventario. No sustituye la autenticación, autorización ni las invariantes del dominio, que deben reevaluarse en cada intento.
 
+`OperationalIncident` conserva incidencias técnicas o financieras con prioridad alta, media o informativa y estado `OPEN`, `ACKNOWLEDGED` o `RESOLVED`. Las repeticiones deben poder agruparse sin perder ocurrencias. Puede relacionarse con un negocio cuando exista correlación verificada, pero no se le asigna un tenant por conjetura.
+
 ## Ventas registradas posteriormente
 
 Las ventas realizadas durante una interrupción de conectividad pueden registrarse cuando se recupere la conexión. Se diferencia entre el momento efectivo de la venta y el momento en que Inventory App la registró.
@@ -295,15 +324,18 @@ Permanecen sin definición funcional completa:
 
 - proveedor externo de autenticación y reglas futuras para vincular más de una identidad a un usuario;
 - sincronización de datos de perfil del proveedor de autenticación;
-- proveedor de facturación SaaS y evento confiable que confirma un cobro, renovación o activación;
-- modelo de intentos de cobro pendientes, fallidos, rechazados o revertidos;
+- selección final del proveedor, contrato de autenticación de webhooks y capacidades verificadas de checkout para Yape, Plin y tarjetas;
+- catálogos definitivos de estados de checkout, resultado financiero, procesamiento de eventos y ajustes;
+- tratamiento determinista de confirmaciones tardías o fuera de orden;
 - tratamiento fiscal y snapshots definitivos de IGV;
 - política de cancelación voluntaria, cierre como `ENDED` y reactivación después de un cierre definitivo;
 - límites de usuarios y demás capacidades concretas de `Esencial`;
 - política de conservación y eventual eliminación de datos a largo plazo;
 - reglas de precios futuros y cambios de plan;
-- atributos de integración externa de `SubscriptionPayment` cuando se seleccione el proveedor;
-- modelo de identidad, autorización y auditoría para la administración de plataforma;
+- atributos de integración externa y política de retención/minimización de eventos cuando se seleccione el proveedor;
+- alcance detallado de permisos administrativos, recuperación financiera y recursos visibles mediante soporte temporal;
+- contenido y validación externa de documentos legales, versiones y evidencias de aceptación;
+- efecto permitido de `SubscriptionPaymentAdjustment` sobre dinero y cobertura;
 - catálogo inicial de unidades y valores predeterminados de granularidad;
 - canonicalización exacta de atributos y valores cuando se apruebe una regla de equivalencia; las reglas de categoría, SKU y código de barras ya están definidas en el modelo relacional;
 - comportamiento operativo detallado de productos, variantes, ubicaciones y proveedores inactivos;

@@ -35,6 +35,7 @@ El dueño tiene acceso administrativo al negocio y puede:
 - consultar movimientos de inventario;
 - consultar reportes;
 - visualizar información general del negocio.
+- aceptar los documentos requeridos en representación del negocio e iniciar checkouts manuales para contratar o renovar `Esencial`.
 
 Las anulaciones, devoluciones y reembolsos son operaciones sensibles reservadas a `OWNER` en la V1.
 
@@ -81,10 +82,27 @@ Una vez suspendido el acceso:
 
 Estos permisos no conceden administración de la plataforma ni acceso a otros negocios. La suspensión no revoca membresías ni elimina operaciones históricas.
 
+## Administración de plataforma
+
+La administración interna no utiliza roles de `BusinessMembership`. `PlatformAdminMembership` relaciona un `User` con la plataforma y en V1 contempla únicamente `PLATFORM_ADMIN`, con estado activo o revocado, autenticación reforzada, MFA y auditoría administrativa.
+
+Una membresía administrativa no concede acceso comercial ilimitado a los tenants. El acceso excepcional de soporte:
+
+- es solo de lectura;
+- se limita a un `Business` y recursos autorizados;
+- exige un motivo documentado;
+- dura como máximo 60 minutos inicialmente;
+- puede revocarse antes de su vencimiento;
+- registra quién lo concedió, utilizó y revocó.
+
+Los ajustes financieros excepcionales, la recuperación operativa y la gestión de incidencias requieren una `PlatformAdminMembership` activa y autorización backend. Sus permisos detallados todavía deben definirse con mínimo privilegio.
+
 ## Decisiones pendientes
 
 - Flujo de invitación a un negocio.
 - Flujo y condiciones de reactivación de una membresía `REVOKED`.
 - Experiencia de usuario para cambios de rol y revocaciones.
+- Matriz mínima de permisos administrativos dentro del único rol inicial y operaciones que requieren reautenticación.
+- Recursos visibles mediante un acceso temporal de soporte y flujo de aprobación o autorregistro.
 
 No se define una matriz granular adicional. Cualquier evolución futura hacia más roles, permisos configurables o RBAC requerirá una decisión explícita.
