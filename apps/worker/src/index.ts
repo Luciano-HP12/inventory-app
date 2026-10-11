@@ -1,5 +1,8 @@
 import { MessageChannel } from "node:worker_threads";
 
+import { loadWorkerConfig } from "./config/environment.js";
+
+loadWorkerConfig();
 console.info("Inventory worker started");
 
 let isShuttingDown = false;

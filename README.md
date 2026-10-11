@@ -81,7 +81,7 @@ La estructura base `apps/` y `packages/` ya está preparada. Las aplicaciones y 
 
 El proyecto ha iniciado la preparación técnica del monorepo después de consolidar su diseño documental.
 
-Actualmente están documentados la arquitectura, los modelos conceptual y relacional, y las reglas principales de seguridad, suscripciones, roles, variantes, inventario, ventas, pagos SaaS y operación de plataforma. Todavía no existen frontends funcionales, una API o worker operativos, un esquema Prisma, migraciones de base de datos, integración de pagos ni un despliegue.
+Actualmente están documentados la arquitectura, los modelos conceptual y relacional, y las reglas principales de seguridad, suscripciones, roles, variantes, inventario, ventas, pagos SaaS y operación de plataforma. Existen aplicaciones base ejecutables para web, administración, API y worker, todavía sin lógica comercial. No existen un esquema Prisma, migraciones de base de datos, integración de pagos ni un despliegue.
 
 ## Desarrollo
 
@@ -92,7 +92,15 @@ npm install
 npm run check
 ```
 
-`npm run check` ejecuta la comprobación de TypeScript, ESLint, Prettier y las pruebas disponibles. En esta etapa no existen aplicaciones ni pruebas funcionales; Vitest finaliza correctamente cuando todavía no encuentra archivos de prueba.
+`npm run check` ejecuta la comprobación de TypeScript, ESLint, Prettier y las pruebas disponibles.
+
+### Variables de entorno
+
+La API admite `NODE_ENV` con `development`, `test` o `production`, y `PORT` como puerto TCP entre 1 y 65535. `NODE_ENV` es obligatorio y `PORT` utiliza `3000` de forma predeterminada. El worker solo admite y requiere `NODE_ENV`.
+
+Los ejemplos seguros se encuentran en `apps/api/.env.example` y `apps/worker/.env.example`. Para desarrollo, copia el ejemplo correspondiente como `.env` dentro del mismo workspace antes de iniciar el proceso. Los scripts Node cargan ese archivo cuando existe; los archivos `.env` reales están excluidos de Git.
+
+Vite expone en el navegador cualquier variable personalizada cuyo nombre comience por `VITE_`. Por ello, esas variables son públicas y nunca deben contener contraseñas, tokens, claves ni otros secretos. Web y admin no utilizan todavía variables públicas personalizadas; cualquier variable futura deberá declararse por separado en el archivo `vite-env.d.ts` de la aplicación que la consuma.
 
 ## Documentación
 

@@ -1,12 +1,10 @@
 import { createApp } from "./app.js";
+import { loadApiConfig } from "./config/environment.js";
 
-const DEFAULT_PORT = 3000;
-const parsedPort = Number.parseInt(process.env.PORT ?? "", 10);
-const port =
-  Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : DEFAULT_PORT;
+const config = loadApiConfig();
 
-const server = createApp().listen(port, () => {
-  console.info(`Inventory API listening on http://localhost:${port}`);
+const server = createApp().listen(config.port, () => {
+  console.info(`Inventory API listening on http://localhost:${config.port}`);
 });
 
 let isShuttingDown = false;
