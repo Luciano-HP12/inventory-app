@@ -85,14 +85,23 @@ Actualmente están documentados la arquitectura, los modelos conceptual y relaci
 
 ## Desarrollo
 
-Desde la raíz del repositorio:
+El monorepo requiere Node.js 24 LTS (`>=24 <25`). Si utilizas `nvm`, desde la raíz del repositorio puedes seleccionar la versión declarada en `.nvmrc`:
 
 ```bash
-npm install
+nvm use
+```
+
+Instala las dependencias y ejecuta las verificaciones locales desde la raíz:
+
+```bash
+npm ci
 npm run check
+npm run build
 ```
 
 `npm run check` ejecuta la comprobación de TypeScript, ESLint, Prettier y las pruebas disponibles.
+
+GitHub Actions ejecuta automáticamente `npm ci`, `npm run check` y `npm run build` en cada `push` a `main` y en cada Pull Request dirigido a `main`. Este pipeline solo verifica calidad, pruebas y compilación; no despliega aplicaciones ni ejecuta migraciones.
 
 ### Variables de entorno
 
